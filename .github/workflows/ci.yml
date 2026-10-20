@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: ui typecheck, build and tests
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t paper-trader .
+      - run: docker run -d --name pt -p 127.0.0.1:8000:8000 paper-trader
+      - name: the container answers
+        run: |
+          for i in $(seq 30); do curl -fsS http://localhost:8000/health && break; sleep 2; done
+          curl -fsS http://localhost:8000/health
+          curl -fsS http://localhost:8000/ | grep -q "Paper Trader"
+      - if: failure()
+        run: docker logs pt
+
+  installer:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, docker]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: choco install innosetup --yes --no-progress
+      - run: python -m venv .venv
+      - run: ./build.ps1
+      - name: attach the installer to a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME (Get-Item dist/PaperTrader-Setup-*.exe).FullName --title "Paper Trader $env:GITHUB_REF_NAME" --generate-notes
