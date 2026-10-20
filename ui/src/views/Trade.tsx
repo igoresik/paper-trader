@@ -23,6 +23,8 @@ function ChartPanel() {
     queryFn: () => api.chart(symbol, chart, accountId),
     placeholderData: (previous) => previous,
     staleTime: 60_000,
+    // intraday indicators and volume catch up once a minute; the candles themselves move with every price
+    refetchInterval: ["1m", "5m", "1h"].includes(chart.interval) ? 60_000 : false,
   });
   useEffect(() => watch(symbol), [symbol]);
 

@@ -17,3 +17,13 @@ export function heikinAshi(bars: Candle[]): Candle[] {
   }
   return out;
 }
+
+/** The candles after a live price at ts. For minute bars (size in seconds) a price past the last bar starts a new
+ * one; longer bars only move, and their next bar arrives with the next fetch. */
+export function withPrice(candles: Candle[], price: number, ts: number, size: number): Candle[] {
+  const last = candles.at(-1);
+  if (!last) return candles;
+  const start = size ? ts - (ts % size) : last.time;
+  if (start > last.time) return [...candles, { time: start, open: price, high: price, low: price, close: price }];
+  return [...candles.slice(0, -1), { ...last, close: price, high: Math.max(last.high, price), low: Math.min(last.low, price) }];
+}

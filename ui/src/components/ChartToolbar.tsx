@@ -12,7 +12,13 @@ const RANGES = [
   { value: "5y", label: "5Y" },
   { value: "all", label: "All" },
 ];
-const HOURLY_RANGES = ["1m", "3m", "6m", "1y"]; // Yahoo keeps two years of hourly bars
+// as far back as Yahoo serves each bar size: a week of 1-minute bars, two months of 5-minute, two years of hourly
+const RANGES_FOR: Partial<Record<ChartPrefs["interval"], { value: string; label: string }[]>> = {
+  "1m": [{ value: "1d", label: "1D" }, { value: "5d", label: "5D" }],
+  "5m": [{ value: "5d", label: "5D" }, { value: "1m", label: "1M" }],
+  "1h": RANGES.filter((r) => ["1m", "3m", "6m", "1y"].includes(r.value)),
+};
+const FIRST_RANGE: Record<ChartPrefs["interval"], string> = { "1m": "1d", "5m": "5d", "1h": "3m", "1d": "1y", "1w": "5y" };
 
 function Row({ children }: { children: React.ReactNode }) {
   return <div className="flex items-center justify-between gap-3 py-1">{children}</div>;
@@ -20,7 +26,7 @@ function Row({ children }: { children: React.ReactNode }) {
 
 export function ChartToolbar({ prefs, onChange }: { prefs: ChartPrefs; onChange: (p: ChartPrefs) => void }) {
   const set = (patch: Partial<ChartPrefs>) => onChange({ ...prefs, ...patch });
-  const ranges = prefs.interval === "1h" ? RANGES.filter((r) => HOURLY_RANGES.includes(r.value)) : RANGES;
+  const ranges = RANGES_FOR[prefs.interval] ?? RANGES;
   const ma = (key: "ma1" | "ma2", name: string) => (
     <Row>
       <Switch checked={prefs[key].on} onChange={(on) => set({ [key]: { ...prefs[key], on } })} label={name} />
@@ -40,10 +46,19 @@ export function ChartToolbar({ prefs, onChange }: { prefs: ChartPrefs; onChange:
     <div className="flex flex-wrap items-center gap-2">
       <Segmented
         size="sm"
-        label="Interval"
+        label="Bar size"
         value={prefs.interval}
-        onChange={(interval) => set({ interval, range: interval === "1h" && !HOURLY_RANGES.includes(prefs.range) ? "3m" : prefs.range })}
-        options={[{ value: "1h", label: "1H" }, { value: "1d", label: "1D" }, { value: "1w", label: "1W" }]}
+        onChange={(interval) => {
+          const allowed = (RANGES_FOR[interval] ?? RANGES).some((r) => r.value === prefs.range);
+          set({ interval, range: allowed ? prefs.range : FIRST_RANGE[interval] });
+        }}
+        options={[
+          { value: "1m", label: "1m", title: "1-minute bars" },
+          { value: "5m", label: "5m", title: "5-minute bars" },
+          { value: "1h", label: "1h", title: "Hourly bars" },
+          { value: "1d", label: "D", title: "Daily bars" },
+          { value: "1w", label: "W", title: "Weekly bars" },
+        ]}
       />
       <Segmented size="sm" label="Range" value={prefs.range} onChange={(range) => set({ range })} options={ranges} />
       <Select
