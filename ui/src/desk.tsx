@@ -1,7 +1,7 @@
 // What the whole window shares: the settings, the active portfolio, the symbol on screen, and the ticket's preset.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api, type ChartPrefs, type Settings, type Side } from "./lib/api";
@@ -60,16 +60,16 @@ export function useSaveSettings() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: api.saveSettings,
+    // one save at a time, in order, so a later change can't be overwritten by an earlier one
+    scope: { id: "settings" },
     onMutate: (changes) => {
       const before = client.getQueryData<Settings>(["settings"]);
       if (before) client.setQueryData(["settings"], { ...before, ...changes });
-      return before;
     },
-    onError: (error, _changes, before) => {
-      if (before) client.setQueryData(["settings"], before);
+    onError: (error) => {
       toast.error("Couldn't save that setting", { description: error.message });
+      client.invalidateQueries({ queryKey: ["settings"] }); // show what the app actually kept
     },
-    onSuccess: (saved) => client.setQueryData(["settings"], saved),
   });
 }
 
@@ -92,10 +92,12 @@ export function DeskProvider({ settings, children }: { settings: Settings; child
   const [view, setView] = useState<View>("trade");
   const [preset, setPreset] = useState<Preset | null>(null);
 
-  useEffect(() => {
+  // a layout effect runs before the children's effects, so charts rebuilt for a new theme read its colours
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.updown = settings.updown;
   }, [theme, settings.updown]);
+  const chart = useMemo(() => ({ ...DEFAULT_CHART, ...settings.chart }), [settings.chart]);
 
   const desk: Desk = {
     settings,
@@ -111,7 +113,7 @@ export function DeskProvider({ settings, children }: { settings: Settings; child
       setView("trade");
       setPreset({ side, shares, nonce: Date.now() });
     },
-    chart: { ...DEFAULT_CHART, ...settings.chart },
+    chart,
     theme,
   };
   return <DeskContext.Provider value={desk}>{children}</DeskContext.Provider>;
