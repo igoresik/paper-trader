@@ -127,7 +127,7 @@ def summarize(folds, oos):
     best = max(scores[name]["balanced_accuracy"] for name in ("majority", "always_buy", "yesterday"))
     edge = scores["model"]["balanced_accuracy"] - best
     if edge > CLEAR:
-        verdict = "beats the baselines"
+        verdict = "better than the baselines"
     elif edge > NOISE:
         verdict = "slightly better than the baselines"
     elif edge >= -NOISE:

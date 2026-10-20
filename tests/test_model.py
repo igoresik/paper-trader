@@ -35,14 +35,14 @@ def test_each_fold_is_tested_only_on_bars_after_its_training_window(put_bars):
 def test_a_random_walk_shows_no_edge(put_bars):
     put_bars("SPY", *random_walk())
     summary = model.validate("SPY", FAST)["metrics"]["summary"]
-    assert summary["verdict"] != "beats the baselines"
+    assert summary["verdict"] != "better than the baselines"
     assert summary["scores"]["model"]["balanced_accuracy"] < 0.45  # leakage would push this far up
 
 
 def test_a_planted_pattern_is_found(put_bars):
     put_bars("SPY", *planted())
     metrics = model.validate("SPY", FAST)["metrics"]
-    assert metrics["summary"]["verdict"] == "beats the baselines"
+    assert metrics["summary"]["verdict"] == "better than the baselines"
     assert metrics["backtest"]["hit_rate"] > 0.9
 
 
