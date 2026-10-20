@@ -109,12 +109,14 @@ export function connect(client: QueryClient) {
       case "fill": {
         const fill = event as unknown as Trade;
         refresh(["portfolio"], ["orders"], ["history"], ["chart", fill.symbol], ["equity"]);
-        if (!shown.has(fill.id)) {
+        // the event can beat the ticket's own HTTP reply; wait for it, so a fill shown as a receipt doesn't toast too
+        setTimeout(() => {
+          if (shown.has(fill.id)) return;
           const verb = fill.side === "BUY" ? "Bought" : "Sold";
           toast.success(`${verb} ${shares(fill.shares)} ${fill.symbol} at ${money(fill.price_cents)}`, {
             description: fill.type === "MARKET" ? "Your queued market order filled at the open." : `Your ${fill.type.toLowerCase()} order filled.`,
           });
-        }
+        }, 2_000);
         break;
       }
       case "rejected":
