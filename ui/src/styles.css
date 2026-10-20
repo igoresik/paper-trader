@@ -1,0 +1,225 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-desk: var(--desk);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-paper: var(--paper);
+  --color-paper-ink: var(--paper-ink);
+  --color-paper-rule: var(--paper-rule);
+  --color-buy: var(--buy);
+  --color-sell: var(--sell);
+  --color-up: var(--up-text);
+  --color-down: var(--down-text);
+  --color-warn: var(--warn);
+}
+
+/* light desk; ticket and receipts are paper in both themes */
+:root {
+  color-scheme: light;
+  --desk: #eceef2;
+  --panel: #f7f8fa;
+  --raised: #ffffff;
+  --rule: #d9dce2;
+  --ink: #171a20;
+  --ink-2: #4e5461;
+  --ink-3: #858b97;
+  --paper: #ffffff;
+  --paper-ink: #1c1f26;
+  --paper-rule: #e2e5ea;
+  --buy: #2f6feb;
+  --sell: #d23f31;
+  --warn: #9a6a00;
+  --ma1: #eb6834;
+  --ma2: #2a78d6;
+  --osc: #4a3aa7;
+  --up: #13915f;
+  --down: #d23f31;
+  --up-text: #0f7a4f;
+  --down-text: #b8352a;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --desk: #15171c;
+  --panel: #1b1e25;
+  --raised: #232731;
+  --rule: #2c3039;
+  --ink: #e9eaee;
+  --ink-2: #a4a8b4;
+  --ink-3: #737886;
+  --paper: #e2e4e8;
+  --paper-ink: #1c1f26;
+  --paper-rule: #c9cdd4;
+  --buy: #5b8cff;
+  --sell: #ff6b5e;
+  --warn: #e5b94e;
+  --ma1: #d95926;
+  --ma2: #3987e5;
+  --osc: #9085e9;
+  --up: #2bad74;
+  --down: #cc3d3b;
+  --up-text: #3cc488;
+  --down-text: #ff6b5e;
+}
+
+/* up and down follow the chosen scheme, never colour alone: arrows and signs go with them */
+[data-updown="red-green"] {
+  --up: #d23f31;
+  --down: #13915f;
+  --up-text: #b8352a;
+  --down-text: #0f7a4f;
+}
+[data-theme="dark"][data-updown="red-green"] {
+  --up: #cc3d3b;
+  --down: #2bad74;
+  --up-text: #ff6b5e;
+  --down-text: #3cc488;
+}
+[data-updown="blue-orange"] {
+  --up: #2f6feb;
+  --down: #c2560f;
+  --up-text: #2257c9;
+  --down-text: #a8480c;
+}
+[data-theme="dark"][data-updown="blue-orange"] {
+  --up: #5b8cff;
+  --down: #d2691e;
+  --up-text: #7fa6ff;
+  --down-text: #f0883e;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--buy);
+  outline-offset: 1px;
+}
+
+/* numbers that line up in columns */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+
+.press {
+  transition: transform 140ms var(--ease-out), background-color 140ms ease, opacity 140ms ease;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* a price cell briefly tints when it changes; the text colour and arrow carry the direction */
+@keyframes tick-up {
+  from {
+    background-color: color-mix(in srgb, var(--up) 22%, transparent);
+  }
+}
+@keyframes tick-down {
+  from {
+    background-color: color-mix(in srgb, var(--down) 22%, transparent);
+  }
+}
+.tick-up {
+  animation: tick-up 600ms var(--ease-out);
+}
+.tick-down {
+  animation: tick-down 600ms var(--ease-out);
+}
+
+/* paper: the ticket and the receipts */
+.paper {
+  background: var(--paper);
+  color: var(--paper-ink);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.04), 0 6px 18px -8px rgb(0 0 0 / 0.35);
+}
+.ruled {
+  background-image: repeating-linear-gradient(to bottom, transparent 0 27px, var(--paper-rule) 27px 28px);
+}
+/* the torn bottom edge of a receipt */
+.perforated {
+  --tooth: 8px;
+  mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / var(--tooth) 51% repeat-x,
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tooth) / 2 + 0.5px) no-repeat;
+}
+
+/* the one orchestrated motion: a filled order's receipt prints out under the ticket */
+@keyframes print {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-6px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0);
+  }
+}
+.printing {
+  animation: print 420ms var(--ease-out) both;
+}
+@keyframes stamp {
+  from {
+    opacity: 0;
+    transform: rotate(-8deg) scale(1.25);
+  }
+  to {
+    opacity: 0.9;
+    transform: rotate(-8deg) scale(1);
+  }
+}
+.stamp {
+  animation: stamp 220ms 300ms var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tick-up,
+  .tick-down,
+  .printing,
+  .stamp {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+  .press:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* scrollbars that sit quietly in the panels */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
