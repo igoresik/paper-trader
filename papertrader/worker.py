@@ -17,6 +17,7 @@ log = logging.getLogger("papertrader")
 STREAM = "wss://streamer.finance.yahoo.com/?version=2"
 SESSIONS = {0: "pre", 1: "regular", 2: "post", 3: "post"}  # Yahoo's market_hours; 0 is left out of messages
 FRESH = 15  # seconds a streamed price counts as live for a market order
+BUCKET = {"1m": 60, "5m": 300, "1h": 3_600}  # counted from the 09:30 open
 
 
 def decode(raw):
@@ -31,6 +32,7 @@ class Worker:
         self.publish = publish  # thread-safe hand-off to every open window
         self.quotes = {}  # symbol -> latest quote
         self.minutes = {}  # symbol -> {minute start: [open, high, low, close, volume]} for its latest session
+        self.day_volume = {}  # symbol -> the running day volume of its last tick
         self.stream = "connecting"
         self.watched = set()
         self.with_orders = set()
@@ -132,7 +134,7 @@ class Worker:
         """Prices and the current session's minutes before the stream says anything, then fill any open orders
         whose price was reached while the app was closed or the stream was down."""
         self.orders_changed()
-        bars = market.minute_bars(sorted(symbols or self.symbols()), period)
+        bars = market.intraday(sorted(symbols or self.symbols()), period)
         for symbol, rows in bars.items():
             if not rows:
                 continue
@@ -185,7 +187,7 @@ class Worker:
             return quote["price_cents"]
         if market.session() != "regular":
             return None
-        rows = market.minute_bars([symbol]).get(symbol) or []
+        rows = market.intraday([symbol]).get(symbol) or []
         if not rows or time.time() - rows[-1]["ts"] > 180:
             return None
         self.quotes.setdefault(symbol, {"symbol": symbol}).update(
@@ -208,21 +210,24 @@ class Worker:
         spy = self.minutes.get("SPY")
         return market.day_start(max(spy)) if spy else market.day_start(time.time())
 
-    def live_bar(self, symbol, interval):
-        """The bar still forming, built from the session's minutes, or None."""
+    def session_bars(self, symbol, interval):
+        """The latest session's minutes grouped into bars of this interval (1m, 5m or 1h), oldest first."""
         minutes = self.minutes.get(symbol)
         if not minutes:
-            return None
-        stamps = sorted(minutes)
-        if interval == "1h":
-            opened = market.session_open(stamps[-1])
-            start = opened + (stamps[-1] - opened) // 3_600 * 3_600
-            stamps = [s for s in stamps if s >= start]
-        else:
-            start = market.day_start(stamps[-1])
-        bars = [minutes[s] for s in stamps]
-        return {"ts": start, "open": bars[0][0], "high": max(b[1] for b in bars), "low": min(b[2] for b in bars),
-                "close": bars[-1][3], "volume": sum(b[4] for b in bars)}
+            return []
+        size, opened = BUCKET[interval], market.session_open(max(minutes))
+        groups = {}
+        for ts in sorted(minutes):
+            groups.setdefault(opened + (ts - opened) // size * size, []).append(minutes[ts])
+        return [_merge(start, parts) for start, parts in groups.items()]
+
+    def live_bar(self, symbol, interval):
+        """The bar still forming, built from the session's minutes, or None."""
+        if interval == "1d":
+            minutes = self.minutes.get(symbol)
+            return _merge(market.day_start(max(minutes)), [minutes[ts] for ts in sorted(minutes)]) if minutes else None
+        bars = self.session_bars(symbol, interval)
+        return bars[-1] if bars else None
 
     # the stream
 
@@ -272,7 +277,12 @@ class Worker:
         quote = self.quotes.setdefault(symbol, {"symbol": symbol})
         if session == "regular":
             quote.update(price_cents=cents, ts=ts, session="regular", ext_price_cents=None)
-            self._add_minute(symbol, ts, cents)
+            traded = 0
+            if (total := msg.get("day_volume")) is not None:  # a running total, so each tick adds the difference
+                total = int(total)
+                traded = max(0, total - self.day_volume.get(symbol, total))
+                self.day_volume[symbol] = total
+            self._add_minute(symbol, ts, cents, traded)
             if symbol in self.with_orders:
                 self.submit(self.match, symbol, [{"ts": ts, "open": cents, "high": cents, "low": cents, "close": cents}])
         else:
@@ -281,12 +291,18 @@ class Worker:
                 quote["session"] = "closed"
         self.publish({"type": "quote", **quote})
 
-    def _add_minute(self, symbol, ts, cents):
+    def _add_minute(self, symbol, ts, cents, volume=0):
         minutes = self.minutes.setdefault(symbol, {})
         if minutes and market.day_start(max(minutes)) != market.day_start(ts):
             minutes.clear()  # a new session
         start = ts - ts % 60
         if bar := minutes.get(start):
-            bar[1], bar[2], bar[3] = max(bar[1], cents), min(bar[2], cents), cents
+            bar[1], bar[2], bar[3], bar[4] = max(bar[1], cents), min(bar[2], cents), cents, bar[4] + volume
         else:
-            minutes[start] = [cents, cents, cents, cents, 0]
+            minutes[start] = [cents, cents, cents, cents, volume]
+
+
+def _merge(ts, parts):
+    """One bar from consecutive [open, high, low, close, volume] parts."""
+    return {"ts": ts, "open": parts[0][0], "high": max(p[1] for p in parts), "low": min(p[2] for p in parts),
+            "close": parts[-1][3], "volume": sum(p[4] for p in parts)}
