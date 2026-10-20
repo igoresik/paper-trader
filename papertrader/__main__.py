@@ -1,4 +1,4 @@
-"""Command line: python -m papertrader ingest SYMBOL | train SYMBOL"""
+"""Command line: python -m papertrader serve | ingest SYMBOL | train SYMBOL"""
 
 import argparse
 import sys
@@ -50,9 +50,21 @@ def train(args):
         print(f"run {result['id']} now drives the live signal for {symbol}")
 
 
+def serve(args):
+    import uvicorn
+
+    from .api import create_app
+
+    uvicorn.run(create_app(), host=args.host, port=args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="papertrader")
     commands = parser.add_subparsers(required=True)
+    cmd = commands.add_parser("serve", help="run the API and the app in a browser, without the desktop window")
+    cmd.add_argument("--host", default="127.0.0.1")
+    cmd.add_argument("--port", type=int, default=8000)
+    cmd.set_defaults(run=serve)
     cmd = commands.add_parser("ingest", help="download history and store its indicators")
     cmd.add_argument("symbol")
     cmd.add_argument("--interval", choices=["1d", "1h"], default="1d")
