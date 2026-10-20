@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+.pytest_cache
+**/__pycache__
+data
+build
+dist
+ui/node_modules
+papertrader/static
