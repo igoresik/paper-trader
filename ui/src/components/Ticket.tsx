@@ -69,9 +69,13 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
     return () => clearTimeout(t);
   }, [confirming]);
 
+  // a confirmation is for one exact order: changing anything asks again
+  useEffect(() => setConfirming(false), [side, qty, amount, limit, mode]);
+
   // B and S pick the side, unless someone is typing
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.target instanceof HTMLElement && e.target.closest("input, textarea, [role=combobox], [role=dialog]")) return;
       if (e.key === "b" || e.key === "B") setSide("BUY");
       if (e.key === "s" || e.key === "S") setSide("SELL");
