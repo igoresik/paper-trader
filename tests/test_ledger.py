@@ -284,13 +284,22 @@ def test_portfolio_values_positions_and_counts_today_from_each_fill():
     buy(acc, 10, 1_000, now=T0)  # held overnight
     day_start = T0 + 86_400
     buy(acc, 5, 1_100, now=day_start + 100)  # bought today
-    p = ledger.portfolio(acc, prices={"AAPL": 1_200}, prev_closes={"AAPL": 1_050}, day_start=day_start)
+    p = ledger.portfolio(acc, price={"AAPL": 1_200}.get, prev_close={"AAPL": 1_050}.get, day_start=day_start)
     [pos] = p["positions"]
     assert (pos["market_value_cents"], pos["unrealized_pnl_cents"]) == (18_000, 18_000 - 15_500)
     # 10 old shares 10.50 -> 12.00 (+15.00); 5 new shares 11.00 -> 12.00 (+5.00)
     assert pos["day_change_cents"] == 2_000
     assert p["total_value_cents"] == 100_000 - 15_500 + 18_000
     assert p["buying_power_cents"] == 84_500
+
+
+def test_equity_curve_values_holdings_at_each_close():
+    acc = account(100_000)
+    buy(acc, 10, 1_000, now=T0 + 100)  # during day 2
+    closes = {(T0, "AAPL"): 990, (T0 + 86_400, "AAPL"): 1_100}
+    days = [(T0 - 50_000, T0), (T0 + 36_400, T0 + 86_400)]  # (bar start, close)
+    curve = ledger.equity_curve(acc, days, lambda symbol, day: closes.get((day + 50_000, symbol)))
+    assert curve == [100_000, 90_000 + 10 * 1_100]
 
 
 @pytest.mark.parametrize("cents, text", [(0, "$0.00"), (5, "$0.05"), (123_456_789, "$1,234,567.89"), (-1_050, "-$10.50")])

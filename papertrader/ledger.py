@@ -384,9 +384,9 @@ def history(account_id, page=1, page_size=50, symbol=None, side=None):
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
-def portfolio(account_id, prices, prev_closes, day_start):
-    """Value the portfolio at prices. Today's change runs from the previous close for shares held overnight
-    and from the fill price for shares traded since day_start."""
+def portfolio(account_id, price, prev_close, day_start):
+    """Value the portfolio. price(symbol) and prev_close(symbol) give cents or None. Today's change runs from
+    the previous close for shares held overnight and from the fill price for shares traded since day_start."""
     acct = account(account_id)
     held = {p["symbol"]: p for p in positions(account_id)}
     today = db.query(
@@ -403,8 +403,8 @@ def portfolio(account_id, prices, prev_closes, day_start):
     for symbol in sorted(held.keys() | {t["symbol"] for t in today}):
         pos = held.get(symbol, {"shares": 0, "cost_basis_cents": 0})
         shares, basis = pos["shares"], pos["cost_basis_cents"]
-        last = prices.get(symbol) or prev_closes.get(symbol) or (basis // shares if shares else 0)
-        prev = prev_closes.get(symbol) or last
+        last = price(symbol) or prev_close(symbol) or (basis // shares if shares else 0)
+        prev = prev_close(symbol) or last
         bought = sum(sign[t["side"]] * t["shares"] for t in today if t["symbol"] == symbol)
         spent = sum(sign[t["side"]] * t["total_cents"] for t in today if t["symbol"] == symbol)
         change = shares * last - (shares - bought) * prev - spent
@@ -430,3 +430,22 @@ def portfolio(account_id, prices, prev_closes, day_start):
         "day_change_cents": day_change,
         "positions": rows,
     }
+
+
+def equity_curve(account_id, days, close_on):
+    """Portfolio value at each day's close: cash then, plus the shares held then at that day's closing price.
+    days are (daily bar start, moment of that day's close); close_on(symbol, day) gives cents."""
+    acct = account(account_id)
+    trades = db.query(
+        "SELECT symbol, side, shares, cash_after_cents, executed_at FROM trades WHERE account_id = ?"
+        " ORDER BY executed_at, id",
+        (account_id,),
+    )
+    values, held, cash, done = [], {}, acct["starting_cash_cents"], 0
+    for day, closed_at in days:
+        while done < len(trades) and trades[done]["executed_at"] <= closed_at:
+            t = trades[done]
+            held[t["symbol"]] = held.get(t["symbol"], 0) + (t["shares"] if t["side"] == "BUY" else -t["shares"])
+            cash, done = t["cash_after_cents"], done + 1
+        values.append(cash + sum(n * (close_on(symbol, day) or 0) for symbol, n in held.items() if n))
+    return values
