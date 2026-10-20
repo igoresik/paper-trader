@@ -104,4 +104,53 @@ CREATE TABLE features (
     PRIMARY KEY (symbol, interval, ts)
 ) WITHOUT ROWID;
 
+-- signal model: each validation run, its out-of-sample predictions, and the signals shown live
+
+CREATE TABLE models (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    params TEXT NOT NULL, -- JSON
+    metrics TEXT NOT NULL, -- JSON: folds, baselines, backtest, track record
+    active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE UNIQUE INDEX one_active_model ON models (symbol, interval) WHERE active = 1;
+
+CREATE TABLE predictions (
+    model_id INTEGER NOT NULL REFERENCES models (id),
+    ts INTEGER NOT NULL,
+    signal TEXT NOT NULL CHECK (signal IN ('BUY', 'HOLD', 'SELL')),
+    confidence REAL NOT NULL,
+    actual TEXT NOT NULL CHECK (actual IN ('BUY', 'HOLD', 'SELL')),
+    PRIMARY KEY (model_id, ts)
+) WITHOUT ROWID;
+
+-- the first signal shown for each bar is kept, so the live record can't be rewritten by retraining
+CREATE TABLE signals (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    ts INTEGER NOT NULL, -- the bar the signal was made after
+    close_cents INTEGER NOT NULL,
+    signal TEXT NOT NULL CHECK (signal IN ('BUY', 'HOLD', 'SELL')),
+    confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+    p_buy REAL NOT NULL,
+    p_hold REAL NOT NULL,
+    p_sell REAL NOT NULL,
+    model_id INTEGER NOT NULL REFERENCES models (id),
+    PRIMARY KEY (symbol, interval, ts)
+) WITHOUT ROWID;
+
+-- app state
+
+CREATE TABLE watchlist (
+    symbol TEXT PRIMARY KEY REFERENCES symbols (symbol),
+    position INTEGER NOT NULL
+);
+
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL -- JSON
+);
+
 PRAGMA user_version = 1;

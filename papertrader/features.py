@@ -33,16 +33,29 @@ def ema(close, span):
     return close.ewm(span=span, adjust=False, min_periods=span).mean()
 
 
+def rsi(close, n):
+    delta = close.diff()
+    return 100 - 100 / (1 + wilder(delta.clip(lower=0), n) / wilder((-delta).clip(lower=0), n))
+
+
+def bollinger(close, n, k):
+    """Middle band and the distance from it to either outer band."""
+    return close.rolling(n).mean(), k * close.rolling(n).std(ddof=0)
+
+
+def macd(close, fast, slow, signal):
+    line = ema(close, fast) - ema(close, slow)
+    trigger = line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    return line, trigger, line - trigger
+
+
 def indicators(close, volume, p=Params()):
     """Feature table for these closes and volumes (float Series on one index)."""
-    delta = close.diff()
-    rsi = 100 - 100 / (1 + wilder(delta.clip(lower=0), p.rsi) / wilder((-delta).clip(lower=0), p.rsi))
-    mid = close.rolling(p.bb).mean()
-    band = p.bb_k * close.rolling(p.bb).std(ddof=0)
+    mid, band = bollinger(close, p.bb, p.bb_k)
     # rolling, not whole-history, mean and std: those would leak later volume into earlier rows
     vol_z = (volume - volume.rolling(p.vol).mean()) / volume.rolling(p.vol).std(ddof=0)
     table = pd.DataFrame({
-        "rsi": rsi,
+        "rsi": rsi(close, p.rsi),
         "ema_spread": (ema(close, p.ema_fast) - ema(close, p.ema_slow)) / close,  # per dollar, so years compare
         "vol_z": vol_z,
         "pct_b": (close - mid + band) / (2 * band),
