@@ -8,6 +8,7 @@ import { useLiveTotals } from "../components/TopBar";
 import { Button, Change, cx, Empty, Input, Segmented } from "../components/ui";
 import { useDesk } from "../desk";
 import { api, type Portfolio, type Side } from "../lib/api";
+import { useDebounced } from "../lib/debounce";
 import { dateTime, marketDay, money, percent, price, shares } from "../lib/format";
 
 function Figure({ label, children, big }: { label: string; children: React.ReactNode; big?: boolean }) {
@@ -76,9 +77,10 @@ function History({ accountId }: { accountId: number }) {
   const [symbol, setSymbol] = useState("");
   const [side, setSide] = useState<"ALL" | Side>("ALL");
   const size = 25;
+  const filter = useDebounced(symbol.trim().toUpperCase(), 300);
   const { data } = useQuery({
-    queryKey: ["history", accountId, page, size, symbol, side],
-    queryFn: () => api.history(accountId, page, size, symbol.trim().toUpperCase(), side === "ALL" ? undefined : side),
+    queryKey: ["history", accountId, page, size, filter, side],
+    queryFn: () => api.history(accountId, page, size, filter, side === "ALL" ? undefined : side),
     placeholderData: (previous) => previous,
   });
   const pages = data ? Math.max(1, Math.ceil(data.total / size)) : 1;
