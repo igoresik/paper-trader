@@ -177,10 +177,11 @@ def frame(symbol, interval, since=0):
     return bars
 
 
-def minute_bars(symbols, period="1d"):
-    """Regular-session 1-minute bars per symbol in cents, oldest first. Symbols Yahoo has nothing for are left out."""
+def intraday(symbols, period="1d", interval="1m"):
+    """Regular-session bars shorter than a day (1m keeps about a week, 5m about two months) per symbol, in cents,
+    oldest first. Symbols Yahoo has nothing for are left out."""
     try:
-        data = yf.download(symbols, period=period, interval="1m", group_by="ticker", auto_adjust=False,
+        data = yf.download(symbols, period=period, interval=interval, group_by="ticker", auto_adjust=False,
                            prepost=False, progress=False, threads=True)
     except Exception as error:
         raise MarketError(OFFLINE) from error

@@ -27,6 +27,8 @@ Cents = Annotated[int, Field(gt=0, le=10**12)]
 Shares = Annotated[int, Field(gt=0, le=10**7)]
 Name = Annotated[str, Field(min_length=1, max_length=40)]
 DAYS_BACK = {"1m": 31, "3m": 92, "6m": 183, "1y": 366, "2y": 731, "5y": 1_827}
+# ranges a minute chart can show, as Yahoo's period names: 1-minute bars go back a week, 5-minute about two months
+MINUTE_RANGES = {"1m": {"1d": "1d", "5d": "5d"}, "5m": {"5d": "5d", "1m": "1mo"}}
 
 
 class AccountIn(BaseModel):
@@ -353,26 +355,55 @@ def create_app(run_worker=True):
             market.refresh(symbol, interval)
         return {**model.report(symbol, interval), "price_cents": worker.price(symbol), "quote": worker.quotes.get(symbol)}
 
+    recent = {}  # (symbol, interval, period) -> (fetched at, bars): minute bars from Yahoo, reused for a minute
+
+    def minute_frame(symbol, interval, period):
+        key = (symbol, interval, period)
+        if key not in recent or time.time() - recent[key][0] > 60:
+            recent[key] = (time.time(), market.intraday([symbol], period, interval).get(symbol, []))
+        merged = {r["ts"]: r for r in recent[key][1]}
+        for bar in worker.session_bars(symbol, interval):  # the stream is fresher than Yahoo for today
+            if old := merged.get(bar["ts"]):  # Yahoo saw the bar open; the stream saw its latest price
+                bar = {**bar, "open": old["open"], "high": max(old["high"], bar["high"]),
+                       "low": min(old["low"], bar["low"]), "volume": max(old["volume"], bar["volume"])}
+            merged[bar["ts"]] = bar
+        rows = [merged[ts] for ts in sorted(merged)]
+        return pd.DataFrame(
+            {k: [r[k] / 100 for r in rows] for k in ("open", "high", "low", "close")}
+            | {"volume": [float(r["volume"]) for r in rows]},
+            index=[r["ts"] for r in rows],
+        )
+
     @app.get("/market/{symbol}/chart", tags=["market"])
     def chart(
-        symbol: str, interval: Literal["1h", "1d", "1w"] = "1d", span: Annotated[str, Query(alias="range")] = "1y",
+        symbol: str, interval: Literal["1m", "5m", "1h", "1d", "1w"] = "1d",
+        span: Annotated[str, Query(alias="range")] = "1y",
         ma1: str = "ema:20", ma2: str = "sma:50", bb: str = "20:2", rsi: str = "14", macd: str = "12:26:9",
         account_id: int | None = None,
     ):
         """Bars (cents), the requested indicators, the model's out-of-sample and live calls, and your own fills."""
         symbol = known(symbol)
-        base = "1d" if interval == "1w" else interval
-        if market.needs_refresh(symbol, base):
-            market.refresh(symbol, base)
         worker.watch(symbol)
-        bars = market.frame(symbol, base)
-        live = worker.live_bar(symbol, base)
-        forming = bool(live) and (bars.empty or int(live["ts"]) > int(bars.index[-1]))
-        if forming:
-            row = {k: live[k] / 100 for k in ("open", "high", "low", "close")} | {"volume": float(live["volume"])}
-            bars = pd.concat([bars, pd.DataFrame([row], index=[live["ts"]])])
-        if interval == "1w":
-            bars = _weekly(bars)
+        if interval in MINUTE_RANGES:
+            periods = MINUTE_RANGES[interval]
+            if span not in periods:
+                names = " or ".join(name.upper() for name in periods)
+                raise HTTPException(422, f"{'1-minute' if interval == '1m' else '5-minute'} bars can show {names}.")
+            bars = minute_frame(symbol, interval, periods[span])
+            forming, since = worker.market_live() and not bars.empty, 0
+        else:
+            base = "1d" if interval == "1w" else interval
+            if market.needs_refresh(symbol, base):
+                market.refresh(symbol, base)
+            bars = market.frame(symbol, base)
+            live = worker.live_bar(symbol, base)
+            forming = bool(live) and (bars.empty or int(live["ts"]) > int(bars.index[-1]))
+            if forming:
+                row = {k: live[k] / 100 for k in ("open", "high", "low", "close")} | {"volume": float(live["volume"])}
+                bars = pd.concat([bars, pd.DataFrame([row], index=[live["ts"]])])
+            if interval == "1w":
+                bars = _weekly(bars)
+            since = _since(span)
         close = bars["close"]
         prices, points = {}, {}  # lines in dollars (sent as cents), and RSI in points
         for key, spec in (("ma1", ma1), ("ma2", ma2)):
@@ -388,7 +419,7 @@ def create_app(run_worker=True):
             points["rsi"] = features.rsi(close, int(r[0]))
         if (m := _numbers(macd, 3, "12:26:9")) is not None:
             prices["macd"], prices["macd_signal"], prices["macd_hist"] = features.macd(close, *map(int, m))
-        keep = bars.index >= _since(span)
+        keep = bars.index >= since
         shown = bars[keep]
         stamps = shown.index.to_numpy()
 
@@ -398,12 +429,12 @@ def create_app(run_worker=True):
 
         cutoff = int(stamps[0]) if len(stamps) else 0
         calls = []
-        if interval != "1w" and (chosen := model.active(symbol, base)):
+        if interval in ("1d", "1h") and (chosen := model.active(symbol, interval)):
             calls = db.query(
                 "SELECT ts, signal, confidence, 'backtest' AS kind FROM predictions WHERE model_id = ? AND ts >= ?"
                 " AND signal != 'HOLD' UNION ALL SELECT ts, signal, confidence, 'live' FROM signals"
                 " WHERE symbol = ? AND interval = ? AND ts >= ? AND signal != 'HOLD' ORDER BY ts",
-                (chosen["id"], cutoff, symbol, base, cutoff),
+                (chosen["id"], cutoff, symbol, interval, cutoff),
             )
         fills, position, orders = [], None, []
         if account_id is not None:

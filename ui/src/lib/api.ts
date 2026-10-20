@@ -3,7 +3,7 @@
 export type Side = "BUY" | "SELL";
 export type OrderType = "MARKET" | "LIMIT" | "STOP";
 export type Call = "BUY" | "HOLD" | "SELL";
-export type Interval = "1h" | "1d" | "1w";
+export type Interval = "1m" | "5m" | "1h" | "1d" | "1w";
 
 export interface Account {
   id: number;

@@ -26,7 +26,8 @@ Good to know:
   - Limit and stop orders fill even if the app was closed when their price came: the app replays the minutes it missed.
 - **Costs:** a commission per order, a commission as a percentage of the order, and slippage. Every rounding goes against you, so the paper ledger can never create money.
 - **Charts:**
-  - Six chart types, hourly, daily and weekly bars, and linear, log or percent scales.
+  - Six chart types, and linear, log or percent scales.
+  - Bar sizes from 1 and 5 minutes to hourly, daily and weekly. Minute candles form live from the price stream; Yahoo keeps a week of 1-minute and two months of 5-minute history.
   - Two moving averages, Bollinger bands, volume, RSI and MACD.
   - Your fills, your average cost and your open orders, drawn on the chart.
   - Every choice is remembered.

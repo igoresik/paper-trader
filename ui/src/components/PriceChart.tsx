@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { ChartData, ChartPrefs } from "../lib/api";
 import { arrow, marketDay, marketTime, percent, price as fmtPrice } from "../lib/format";
-import { heikinAshi, type Candle } from "../lib/heikinAshi";
+import { heikinAshi, withPrice, type Candle } from "../lib/candles";
 import { useQuote } from "../lib/live";
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -18,6 +18,9 @@ function alpha(hex: string, a: number) {
   return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
+const INTRADAY: string[] = ["1m", "5m", "1h"];
+const MODEL_INTERVALS: string[] = ["1d", "1h"]; // the intervals the model makes calls for
+const BAR_SECONDS: Record<string, number> = { "1m": 60, "5m": 300 };
 const at = (t: number) => t as UTCTimestamp;
 const toLine = (t: number[], values: (number | null)[], scale = 1) =>
   t.map((time, i) => (values[i] == null ? { time: at(time) } : { time: at(time), value: (values[i] as number) / scale }));
@@ -76,7 +79,7 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
       up: css("--up"), down: css("--down"), buy: css("--buy"), sell: css("--sell"), ma1: css("--ma1"), ma2: css("--ma2"),
       osc: css("--osc"),
     };
-    const hourly = data.interval === "1h";
+    const intraday = INTRADAY.includes(data.interval);
     const chart = createChart(el, {
       autoSize: true,
       layout: {
@@ -94,7 +97,7 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
       },
       timeScale: {
         borderColor: c.rule,
-        timeVisible: hourly,
+        timeVisible: intraday,
         rightOffset: 3,
         tickMarkFormatter: (time: Time, type: TickMarkType) => {
           const ts = time as number;
@@ -108,7 +111,7 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
       localization: {
         locale: "en-US",
         priceFormatter: (p: number) => p.toFixed(2),
-        timeFormatter: (time: Time) => (hourly ? `${marketDay(time as number)} ${marketTime(time as number)} ET` : marketDay(time as number)),
+        timeFormatter: (time: Time) => (intraday ? `${marketDay(time as number)} ${marketTime(time as number)} ET` : marketDay(time as number)),
       },
     });
 
@@ -138,7 +141,7 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
         series[key] = chart.addSeries(LineSeries, { color: alpha(c.ink3, key === "bb_mid" ? 0.5 : 0.9), lineWidth: 1, ...quiet });
     }
     let pane = 1;
-    if (prefs.calls && data.interval !== "1w") {
+    if (prefs.calls && MODEL_INTERVALS.includes(data.interval)) {
       // the model's calls as a strip under the price: one cell per bar, so years of calls stay readable
       series.calls = chart.addSeries(HistogramSeries, { ...quiet, priceScaleId: "calls", base: 0 }, pane);
       chart.priceScale("calls", pane).applyOptions({ visible: false, scaleMargins: { top: 0.15, bottom: 0.15 } });
@@ -247,36 +250,34 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
     redraw((n) => n + 1);
   }, [data, prefs, structure]);
 
-  // the bar still forming follows the live price
+  // the bar still forming follows the live price; on minute charts a new bar starts each minute
   useEffect(() => {
     const b = built.current;
-    const last = raw.current.at(-1);
-    if (!b || !last || !data.forming || quote?.session !== "regular" || !quote.price_cents) return;
-    const p = quote.price_cents / 100;
-    const next = { ...last, close: p, high: Math.max(last.high, p), low: Math.min(last.low, p) };
-    raw.current = [...raw.current.slice(0, -1), next];
-    if (!b.candles) b.main.update({ time: at(next.time), value: p });
+    if (!b || !raw.current.length || !data.forming || quote?.session !== "regular" || !quote.price_cents || !quote.ts) return;
+    raw.current = withPrice(raw.current, quote.price_cents / 100, quote.ts, BAR_SECONDS[data.interval] ?? 0);
+    const next = raw.current.at(-1)!;
+    if (!b.candles) b.main.update({ time: at(next.time), value: next.close });
     else if (prefs.type === "heikin") b.main.update({ ...heikinAshi(raw.current).at(-1)!, time: at(next.time) });
     else b.main.update({ ...next, time: at(next.time) });
     redraw((n) => n + 1);
-  }, [quote, data.forming, prefs.type]);
+  }, [quote, data.forming, data.interval, prefs.type]);
 
   // the hovered bar, or the latest one when the pointer is elsewhere
   const legend = legendAt(hovered ?? raw.current.length - 1, raw.current, dataRef.current, prefs);
   return (
     <div className="relative h-full min-h-0">
       <div ref={box} className="absolute inset-0" />
-      <ChartLegend legend={legend} hourly={data.interval === "1h"} calls={prefs.calls && data.interval !== "1w"} />
+      <ChartLegend legend={legend} intraday={INTRADAY.includes(data.interval)} calls={prefs.calls && MODEL_INTERVALS.includes(data.interval)} />
     </div>
   );
 }
 
-function ChartLegend({ legend, hourly, calls }: { legend: Legend | null; hourly: boolean; calls: boolean }) {
+function ChartLegend({ legend, intraday, calls }: { legend: Legend | null; intraday: boolean; calls: boolean }) {
   if (!legend) return null;
   const tone = legend.change == null ? "text-ink-2" : legend.change >= 0 ? "text-up" : "text-down";
   return (
     <div className="pointer-events-none absolute top-1.5 left-2 z-10 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-ink-2">
-      <span className="text-ink">{hourly ? `${marketDay(legend.time)} ${marketTime(legend.time)}` : marketDay(legend.time)}</span>
+      <span className="text-ink">{intraday ? `${marketDay(legend.time)} ${marketTime(legend.time)}` : marketDay(legend.time)}</span>
       <span className="num">O <b className="font-medium text-ink">{fmtPrice(legend.open * 100)}</b></span>
       <span className="num">H <b className="font-medium text-ink">{fmtPrice(legend.high * 100)}</b></span>
       <span className="num">L <b className="font-medium text-ink">{fmtPrice(legend.low * 100)}</b></span>

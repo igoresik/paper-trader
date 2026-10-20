@@ -18,7 +18,7 @@ def app(monkeypatch, put_bars):
 
     monkeypatch.setattr(market, "needs_refresh", lambda *args, **kwargs: False)
     monkeypatch.setattr(market, "refresh", offline)
-    monkeypatch.setattr(market, "minute_bars", offline)
+    monkeypatch.setattr(market, "intraday", offline)
     put_bars("AAPL", *walk())
     application = api.create_app(run_worker=False)
     application.state.worker.fresh_price = lambda symbol: 15_000  # a live $150.00
@@ -131,6 +131,27 @@ def test_chart_adds_the_bar_still_forming(app, client):
     chart = client.get("/market/AAPL/chart", params={"range": "all"}).json()
     assert chart["forming"] is True
     assert (chart["bars"]["h"][-1], chart["bars"]["c"][-1], chart["bars"]["v"][-1]) == (15_200, 15_150, 3_000)
+
+
+def test_minute_chart_adds_the_streamed_minutes_to_yahoos(app, client, monkeypatch):
+    opened = 1_792_416_600  # Monday 2026-10-19, 09:30 New York
+    yahoo = [{"ts": opened + 60 * i, "open": 15_000, "high": 15_010, "low": 14_990, "close": 15_000 + i, "volume": 500}
+             for i in range(3)]
+    five_minute = [{"ts": opened, "open": 15_000, "high": 15_010, "low": 14_990, "close": 15_002, "volume": 1_500}]
+    monkeypatch.setattr(market, "intraday", lambda symbols, period, interval: {"AAPL": yahoo if interval == "1m" else five_minute})
+    worker = app.state.worker
+    worker.minutes["AAPL"] = {opened + 120: [15_002, 15_050, 15_000, 15_040, 100], opened + 180: [15_040, 15_060, 15_030, 15_055, 80]}
+    worker.market_live = lambda: True
+    chart = client.get("/market/AAPL/chart", params={"interval": "1m", "range": "1d"}).json()
+    assert chart["bars"]["t"] == [opened, opened + 60, opened + 120, opened + 180]
+    assert chart["bars"]["c"][2:] == [15_040, 15_055]  # the stream wins for the minutes it has seen
+    assert chart["bars"]["v"][2] == 500  # but never with less volume than Yahoo counted
+    assert (chart["forming"], chart["calls"]) == (True, [])
+    five = client.get("/market/AAPL/chart", params={"interval": "5m", "range": "5d"}).json()
+    assert five["bars"]["t"] == [opened]  # every minute so far falls in the 09:30 bar
+    # Yahoo saw the 09:30 open; the stream has the newest price and a higher high
+    assert (five["bars"]["o"], five["bars"]["h"], five["bars"]["c"], five["bars"]["v"]) == ([15_000], [15_060], [15_055], [1_500])
+    assert client.get("/market/AAPL/chart", params={"interval": "1m", "range": "1y"}).status_code == 422
 
 
 def test_history_downloads_as_csv(client):
