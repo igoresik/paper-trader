@@ -61,4 +61,47 @@ BEGIN SELECT RAISE(ABORT, 'trades are append-only'); END;
 CREATE TRIGGER trades_no_delete BEFORE DELETE ON trades
 BEGIN SELECT RAISE(ABORT, 'trades are append-only'); END;
 
+-- market data
+
+CREATE TABLE symbols (
+    symbol TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    exchange TEXT,
+    kind TEXT NOT NULL, -- EQUITY or ETF
+    currency TEXT NOT NULL
+);
+
+-- complete bars only; prices are split-adjusted, as brokers chart them
+CREATE TABLE bars (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL CHECK (interval IN ('1h', '1d')),
+    ts INTEGER NOT NULL, -- bar start
+    open_cents INTEGER NOT NULL,
+    high_cents INTEGER NOT NULL,
+    low_cents INTEGER NOT NULL,
+    close_cents INTEGER NOT NULL,
+    volume INTEGER NOT NULL,
+    PRIMARY KEY (symbol, interval, ts)
+) WITHOUT ROWID;
+
+CREATE TABLE fetches (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (symbol, interval)
+) WITHOUT ROWID;
+
+-- feature store: indicators per bar, built with the active model's settings
+CREATE TABLE features (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    rsi REAL,
+    ema_spread REAL,
+    vol_z REAL,
+    pct_b REAL,
+    bb_width REAL,
+    PRIMARY KEY (symbol, interval, ts)
+) WITHOUT ROWID;
+
 PRAGMA user_version = 1;
