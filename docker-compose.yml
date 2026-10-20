@@ -1,0 +1,10 @@
+services:
+  paper-trader:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000" # only this computer; the app has no login
+    volumes:
+      - paper-data:/data
+
+volumes:
+  paper-data:
