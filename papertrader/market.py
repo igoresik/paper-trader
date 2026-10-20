@@ -83,6 +83,24 @@ def _tradable(symbol, meta):
 # trading hours
 
 
+def session(now=None):
+    """pre, regular, post or closed, by the New York clock (holidays show up as no fresh prices instead)."""
+    local = datetime.fromtimestamp(now or time.time(), NY)
+    at = local.time()
+    if local.weekday() >= 5 or not clock(4) <= at < clock(20):
+        return "closed"
+    return "pre" if at < clock(9, 30) else "regular" if at < CLOSE else "post"
+
+
+def day_start(ts):
+    """Midnight New York time on the day ts falls on: daily bars start there."""
+    return int(datetime.combine(datetime.fromtimestamp(ts, NY).date(), clock(0), NY).timestamp())
+
+
+def session_open(ts):
+    return int(datetime.combine(datetime.fromtimestamp(ts, NY).date(), clock(9, 30), NY).timestamp())
+
+
 def session_close(ts):
     """16:00 New York time on the day ts falls on."""
     return int(datetime.combine(datetime.fromtimestamp(ts, NY).date(), CLOSE, NY).timestamp())
@@ -157,6 +175,24 @@ def frame(symbol, interval, since=0):
         bars[col] = bars.pop(f"{col}_cents") / 100
     bars["volume"] = bars.pop("volume").astype(float)
     return bars
+
+
+def minute_bars(symbols, period="1d"):
+    """Regular-session 1-minute bars per symbol in cents, oldest first. Symbols Yahoo has nothing for are left out."""
+    try:
+        data = yf.download(symbols, period=period, interval="1m", group_by="ticker", auto_adjust=False,
+                           prepost=False, progress=False, threads=True)
+    except Exception as error:
+        raise MarketError(OFFLINE) from error
+    found = {}
+    for symbol in set(symbols) & set(data.columns.get_level_values(0)):
+        rows = data[symbol].dropna(subset=["Close"])
+        found[symbol] = [
+            {"ts": int(r.Index.timestamp()), "open": cents(r.Open), "high": cents(r.High), "low": cents(r.Low),
+             "close": cents(r.Close), "volume": 0 if pd.isna(r.Volume) else int(r.Volume)}
+            for r in rows.itertuples()
+        ]
+    return found
 
 
 def search(query, limit=8):
