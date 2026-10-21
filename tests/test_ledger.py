@@ -310,6 +310,62 @@ def test_equity_curve_counts_fills_booked_out_of_time_order():
     assert curve == [100_000]
 
 
+def split(ts, ratio, symbol="AAPL"):
+    with db.tx() as conn:
+        conn.execute("INSERT INTO splits (symbol, ts, ratio) VALUES (?, ?, ?)", (symbol, ts, ratio))
+
+
+def test_a_split_multiplies_held_shares_and_moves_open_orders():
+    acc = account()
+    buy(acc, 10, 1_000, now=T0)
+    sell_order = ledger.place_order(acc, "AAPL", "SELL", "LIMIT", 5, limit_cents=1_500, now=T0)
+    buy_order = ledger.place_order(acc, "AAPL", "BUY", "STOP", 3, stop_cents=1_201, now=T0)
+    split(T0 + 86_400, 2.0)
+    changes = ledger.apply_splits("AAPL", now=T0 + 90_000)
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": 20, "cost_basis_cents": 10_000}]
+    moved = {o["id"]: o for o in ledger.orders(acc)}
+    assert (moved[sell_order["id"]]["shares"], moved[sell_order["id"]]["limit_cents"]) == (10, 750)
+    assert (moved[buy_order["id"]]["shares"], moved[buy_order["id"]]["stop_cents"]) == (6, 601)
+    assert changes == [{"symbol": "AAPL", "account_id": acc, "split": "2-for-1", "shares_before": 10,
+                        "shares_after": 20, "cash_cents": 0}]
+    assert ledger.apply_splits("AAPL") == []  # each split moves the ledger once
+
+
+def test_a_reverse_split_pays_the_leftover_fraction_in_cash(put_bars):
+    put_bars("AAPL", [100.0], start=T0)  # Yahoo's close the day before, already on the new share count
+    acc = account(100_000)
+    buy(acc, 15, 1_000, now=T0 + 100)
+    order = ledger.place_order(acc, "AAPL", "BUY", "LIMIT", 5, limit_cents=900, now=T0 + 100)
+    split(T0 + 86_400, 0.1)
+    ledger.apply_splits("AAPL")
+    # 15 old shares are 1.5 new ones: 1 is kept, the half is paid at $100 and takes a third of the cost with it
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": 1, "cost_basis_cents": 10_000}]
+    assert ledger.account(acc)["cash_balance_cents"] == 100_000 - 15_000 + 5_000
+    cancelled = ledger.orders(acc, "CANCELLED")[0]
+    assert cancelled["id"] == order["id"] and "1-for-10" in cancelled["reason"]
+    days = [(T0, T0 + 1_000), (T0 + 86_400, T0 + 87_400)]
+    assert ledger.equity_curve(acc, days, lambda symbol, day: 10_000) == [100_000, 100_000]
+
+
+def test_shares_traded_after_a_split_began_stay_as_they_are():
+    acc = account()
+    buy(acc, 10, 1_000, now=T0)
+    buy(acc, 5, 500, now=T0 + 86_400 + 60)  # at the new price, before the app had seen the split
+    split(T0 + 86_400, 2.0)
+    ledger.apply_splits("AAPL")
+    assert ledger.positions(acc)[0]["shares"] == 25
+
+
+def test_equity_curve_counts_old_shares_on_the_new_count():
+    acc = account(100_000)
+    buy(acc, 10, 1_000, now=T0 + 100)
+    split(T0 + 86_400, 2.0)
+    ledger.apply_splits("AAPL")
+    closes = {T0: 500, T0 + 86_400: 550}  # split-adjusted, as Yahoo serves them
+    days = [(T0, T0 + 1_000), (T0 + 86_400, T0 + 87_400)]
+    assert ledger.equity_curve(acc, days, lambda symbol, day: closes[day]) == [100_000, 101_000]
+
+
 @pytest.mark.parametrize("cents, text", [(0, "$0.00"), (5, "$0.05"), (123_456_789, "$1,234,567.89"), (-1_050, "-$10.50")])
 def test_money(cents, text):
     assert ledger.money(cents) == text
