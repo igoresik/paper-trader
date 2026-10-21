@@ -453,7 +453,7 @@ def create_app(run_worker=True):
             held = [p for p in ledger.positions(account_id) if p["symbol"] == symbol]
             if held:
                 position = {"shares": held[0]["shares"],
-                            "avg_cost_cents": (2 * held[0]["cost_basis_cents"] + held[0]["shares"]) // (2 * held[0]["shares"])}
+                            "avg_cost_cents": ledger.avg_cost(held[0]["cost_basis_cents"], held[0]["shares"])}
             orders = [{"id": o["id"], "side": o["side"], "type": o["type"], "shares": o["shares"],
                        "price_cents": o["limit_cents"] or o["stop_cents"]}
                       for o in ledger.orders(account_id) if o["symbol"] == symbol and o["type"] != "MARKET"]
