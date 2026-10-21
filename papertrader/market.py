@@ -1,6 +1,7 @@
 """Market data from Yahoo Finance (via yfinance): history cached in SQLite, symbol checks and New York trading hours."""
 
 import logging
+import math
 import re
 import time
 from datetime import datetime, timedelta
@@ -139,7 +140,7 @@ def refresh(symbol, interval="1d", now=None):
     and store the bars that are complete. Returns how many were stored."""
     symbol, now = clean(symbol), now or int(time.time())
     ticker = _ticker(symbol)
-    frame = _history(ticker, symbol, period=PERIODS[interval], interval=interval, auto_adjust=False, actions=False)
+    frame = _history(ticker, symbol, period=PERIODS[interval], interval=interval, auto_adjust=False, actions=True)
     info = _tradable(symbol, ticker.history_metadata or {})
     rows = [
         (symbol, interval, ts, cents(r.Open), cents(r.High), cents(r.Low), cents(r.Close), int(r.Volume))
@@ -155,11 +156,35 @@ def refresh(symbol, interval="1d", now=None):
         )
         conn.execute("DELETE FROM bars WHERE symbol = ? AND interval = ?", (symbol, interval))
         conn.executemany("INSERT INTO bars VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        _keep_splits(conn, symbol, frame)
         conn.execute(
             "INSERT INTO fetches VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at",
             (symbol, interval, now),
         )
     return len(rows)
+
+
+def _keep_splits(conn, symbol, frame):
+    """Yahoo marks a split on the first bar at the new price; it's stored once, by that day's start."""
+    if "Stock Splits" in frame:
+        conn.executemany(
+            "INSERT OR IGNORE INTO splits (symbol, ts, ratio) VALUES (?, ?, ?)",
+            [(symbol, day_start(int(at.timestamp())), float(ratio))
+             for at, ratio in frame["Stock Splits"].items() if ratio and not pd.isna(ratio)],
+        )
+
+
+def check_splits(symbol):
+    """The last few days' splits. A split takes effect at the open, long before that day's bar is complete."""
+    frame = _history(_ticker(symbol), symbol, period="5d", interval="1d", auto_adjust=False, actions=True)
+    with db.tx() as conn:
+        _keep_splits(conn, symbol, frame)
+
+
+def split_factor(symbol):
+    """factor(ts): how many shares one share held at ts has become, from the splits since (10 after a 10-for-1)."""
+    splits = db.query("SELECT ts, ratio FROM splits WHERE symbol = ?", (symbol,))
+    return lambda ts: math.prod(s["ratio"] for s in splits if s["ts"] > ts)
 
 
 def frame(symbol, interval, since=0):
