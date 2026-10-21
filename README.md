@@ -41,12 +41,19 @@ Good to know:
 
 ## How the model is tested, and what it shows
 
-The model is a random forest by default; gradient boosting is the other choice. It guesses whether the next bar closes more than 0.5% up (BUY), more than 0.5% down (SELL), or in between (HOLD). Its inputs, all computed from past bars only:
+There are two models, both random forests by default (gradient boosting is the other choice), trained on all of a symbol's daily history (SPY: from 1993):
+
+- **The signal** guesses whether the next bar closes more than 0.5% up (BUY), more than 0.5% down (SELL), or in between (HOLD).
+- **The move reading** guesses whether the next bar moves more than usual, either way. Usual is the median size of the last 60 moves, so about half of all days are bigger.
+
+Their inputs, all known by the bar's close:
 
 - the 14-bar RSI
 - the gap between the 12- and 26-bar EMAs, as a share of the price
 - volume against its own last 20 bars
 - the Bollinger %B and band width
+- the 5- and 20-bar moves
+- market context: the VIX, its 5-day change and the 10-year Treasury yield's 5-day change (a daily bar sees that day's close; an hourly bar only the day before's)
 
 It is never tested on a random split, because that would let the future leak into the past.
 
@@ -58,17 +65,17 @@ It is never tested on a random split, because that would let the future leak int
 
 **Could it be luck?** The edge over the best simple rule gets a likely range, from resampling the tested days in blocks of 20 (neighbouring days move together, so single days would overstate the evidence). Every Model lab run on the same data is another chance to look good by luck, so the range widens with each one. The verdict follows the range: better only when the whole range is above zero.
 
-**Is this call worth anything?** A signal only shows as Buy or Sell when calls like it, at that confidence and out of sample, were right clearly more often than that kind of day happens anyway. Otherwise the card says **No clear edge** and shows which way the model leans.
+**Is this call worth anything?** A Buy or Sell only shows when calls like it, at that confidence and out of sample, got the direction right clearly more than half the time on the days that moved. Otherwise the card says **No clear edge** and shows which way the model leans. Hold never shows as a call on its own: how big the move will be is the move reading's question, and it gets the same test (right clearly more often than that happens anyway).
 
-On five years of SPY (21 October 2026), the honest answer was:
+On SPY's whole history (a run on 21 October 2026, tested on 7,050 days from October 1998 on), the honest answer was:
 
-| | Balanced accuracy | Return over the tested years |
-|---|---|---|
-| Random forest | 37.3% | -1.3% |
-| Best simple rule | 36.5% | |
-| Buy and hold | | +111.1% |
+| | Model | Best simple rule | Likely edge |
+|---|---|---|---|
+| Up, flat or down (balanced accuracy) | 44.8% | 35.4% | +7.7 to +11.0 points |
+| Up or down alone, on days that moved | 52.0% | 50% (a coin toss) | likely 50.1% to 54.0% |
+| Bigger move than usual (balanced accuracy) | 59.5% | 50.6% | +7.1 to +10.1 points |
 
-That's an edge of +0.8 points, likely between -3.3 and +5.4: not clearly better than the simple rules, and following it earned far less than buying and holding. A day earlier, the same test had said 39.4% and +14.3%. Small edges like this move with one more day of data, which is why the app shows the range. Gradient boosting showed no edge at all and memorised its training data. It is for learning, not for trading real money.
+So the model can't really tell which way SPY goes next: 52% is barely better than tossing a coin, and following its buy calls returned +166% against +696% for buy and hold. What it can tell is whether a bigger move than usual is coming, mostly from the VIX, in every block of years tested, including 2021 to 2026. The app shows exactly that: most days the signal says **No clear edge**, and the move reading carries the part that works. Trained on five years instead of all of SPY's history, the same test swung between "not clearly better" and "better" from one day to the next. It is for learning, not for trading real money.
 
 ## Run from source
 
