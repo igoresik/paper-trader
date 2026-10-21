@@ -40,6 +40,7 @@ class Params:
     folds: int = 5
     min_confidence: float = 0.0
     cost_bps: float = 5.0  # charged on every change of position in the backtest
+    prune: bool = False  # drop inputs that don't help, picked inside each training window
     indicators: features.Params = field(default_factory=features.Params)
 
     @classmethod
@@ -73,6 +74,29 @@ def _proba(model, X):
     return out
 
 
+def _inputs(X, y, p):
+    """The columns to train on. With p.prune: fit on the first 80% of these rows and keep the inputs whose shuffling
+    hurts the last 20%. Only training rows decide, so the bars it's tested on never pick its inputs."""
+    if not p.prune:
+        return list(X.columns)
+    cut = int(len(X) * 0.8)
+    trial = _estimator(p).fit(X.iloc[:cut], y.iloc[:cut])
+    drop = permutation_importance(trial, X.iloc[cut:], y.iloc[cut:], scoring="balanced_accuracy", n_repeats=5,
+                                  random_state=0).importances_mean
+    return [c for c, v in zip(X.columns, drop) if v > 0] or [X.columns[int(drop.argmax())]]
+
+
+def _fit(X, y, p):
+    """A fitted model and the columns it reads."""
+    cols = _inputs(X, y, p)
+    return _estimator(p).fit(X[cols], y), cols
+
+
+def _predict(fitted, X):
+    model, cols = fitted
+    return _proba(model, X[cols])
+
+
 def _decide(proba, min_confidence):
     pick, conf = np.array(CLASSES)[proba.argmax(axis=1)], proba.max(axis=1)
     unsure = conf < min_confidence
@@ -99,8 +123,8 @@ def walk_forward(X, y, p, progress=None):
     yesterday = yk.shift(1)  # the previous bar's label is already known when predicting
     folds, parts = [], []
     for k, (train, test) in enumerate(TimeSeriesSplit(n_splits=p.folds).split(Xk), 1):
-        model = _estimator(p).fit(Xk.iloc[train], yk.iloc[train])
-        proba = _proba(model, Xk.iloc[test])
+        fitted = _fit(Xk.iloc[train], yk.iloc[train], p)
+        proba = _predict(fitted, Xk.iloc[test])
         pred, conf = _decide(proba, p.min_confidence)
         actual = yk.iloc[test].to_numpy()
         part = pd.DataFrame(
@@ -114,14 +138,15 @@ def walk_forward(X, y, p, progress=None):
             **_scores(actual, pred),
             "macro_f1": f1_score(actual, pred, labels=CLASSES, average="macro", zero_division=0),
             "train_balanced_accuracy": balanced_accuracy_score(
-                yk.iloc[train], _decide(_proba(model, Xk.iloc[train]), p.min_confidence)[0]
+                yk.iloc[train], _decide(_predict(fitted, Xk.iloc[train]), p.min_confidence)[0]
             ),
+            "inputs": fitted[1],
             "baselines": {name: accuracy_score(actual, part[name]) for name in ("majority", "always_buy", "yesterday")},
         })
         parts.append(part)
         if progress:
             progress(k / (p.folds + 1))
-    return folds, pd.concat(parts), (model, Xk.iloc[test], yk.iloc[test])
+    return folds, pd.concat(parts), (fitted[0], Xk.iloc[test][fitted[1]], yk.iloc[test])
 
 
 def _balanced(actual, pred):
@@ -283,6 +308,7 @@ def validate(symbol, p, progress=None):
         "backtest": backtest(oos, bars["close"], p),
         "track_record": track_record(oos),
         "importance": dict(zip(last_X.columns, importance.round(4).tolist())),
+        "inputs": list(X.columns),  # every input on offer; with pruning each fold lists the ones it kept
         "rows": len(oos), "from": int(oos.index[0]), "to": int(oos.index[-1]),
         "move": {"summary": summarize(move_folds, move_oos, tries), "track_record": track_record(move_oos, MOVE),
                  "base_rate": float((move_oos["actual"] == 1).mean())},
@@ -361,11 +387,11 @@ def live_signal(symbol, interval):
         if not cached or cached[:2] != (chosen["id"], bars.index[-1]):
             known = X.notna().all(axis=1) & y.notna()
             moved = X.notna().all(axis=1) & big.notna()
-            cached = (chosen["id"], bars.index[-1], _estimator(p).fit(X[known], y[known].astype(int)),
-                      _estimator(p).fit(X[moved], big[moved].astype(int)))
+            cached = (chosen["id"], bars.index[-1], _fit(X[known], y[known].astype(int), p),
+                      _fit(X[moved], big[moved].astype(int), p))
             _fitted[(symbol, interval)] = cached
-    proba = _proba(cached[2], X.iloc[[-1]])
-    p_big = float(_proba(cached[3], X.iloc[[-1]])[0, 2])
+    proba = _predict(cached[2], X.iloc[[-1]])
+    p_big = float(_predict(cached[3], X.iloc[[-1]])[0, 2])
     pred, conf = _decide(proba, p.min_confidence)
     signal = {
         "symbol": symbol, "interval": interval, "ts": int(bars.index[-1]),
