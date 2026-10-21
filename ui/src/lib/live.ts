@@ -126,6 +126,15 @@ export function connect(client: QueryClient) {
       case "order":
         refresh(["portfolio"], ["orders"], ["chart", (event as unknown as Order).symbol]);
         break;
+      case "split": {
+        const cash = Number(event.cash_cents);
+        refresh(["portfolio"], ["orders"], ["chart", event.symbol], ["equity"]);
+        toast.info(`${event.symbol} split ${event.split}`, {
+          description: `${shares(Number(event.shares_before))} shares became ${shares(Number(event.shares_after))}`
+            + (cash ? `, plus ${money(cash)} for the fraction left over` : "") + ". Open orders moved to the new share count.",
+        });
+        break;
+      }
       case "signal":
       case "history":
         refresh(["watchlist"], ["signal", event.symbol], ["chart", event.symbol]);

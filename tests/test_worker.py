@@ -1,7 +1,7 @@
 import threading
 import time
 
-from papertrader import ledger
+from papertrader import db, ledger, market
 from papertrader.worker import Worker
 
 OPEN = 1_792_416_600  # Monday 2026-10-19, 09:30 New York
@@ -71,6 +71,26 @@ def test_ticks_that_arrive_mid_match_are_matched_together_next():
         tick(worker, 150.0, second)
     release.set()
     assert wait_for(lambda: runs == [1, 3])
+
+
+def test_a_split_reaches_open_orders_before_ticks_at_the_new_price(monkeypatch):
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.execute_market(acc, "AAPL", "BUY", 10, 9_500, now=OPEN - 86_400)
+    ledger.place_order(acc, "AAPL", "SELL", "STOP", 10, stop_cents=9_000, now=OPEN - 86_400)
+
+    def yahoo_marks_a_split(symbol):
+        with db.tx() as conn:
+            conn.execute("INSERT OR IGNORE INTO splits (symbol, ts, ratio) VALUES (?, ?, 10.0)", (symbol, market.day_start(OPEN)))
+
+    monkeypatch.setattr(market, "check_splits", yahoo_marks_a_split)
+    monkeypatch.setattr(market, "session", lambda now=None: "regular")
+    worker = Worker(lambda event: None)
+    worker.orders_changed()
+    tick(worker, 9.60)  # $96 before the split: above the $90 stop
+    worker.matcher.submit(lambda: None).result()
+    stop = ledger.orders(acc)  # still open, now on the new share count
+    assert [(o["shares"], o["stop_cents"]) for o in stop] == [(100, 900)]
+    assert ledger.positions(acc)[0]["shares"] == 100
 
 
 def wait_for(check, seconds=5):

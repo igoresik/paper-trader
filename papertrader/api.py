@@ -308,6 +308,7 @@ def create_app(run_worker=True):
         """Market order. Fills now at the live price; while the market is closed it waits for the next open,
         unless Practice mode is on, which fills at the last price."""
         symbol = known(body.symbol)
+        worker.check_splits(symbol)  # on a split day, before the shares held are checked
         costs, prefs = settings.costs(), settings.get()
         price, practice = worker.fresh_price(symbol), False
         if price is None and prefs["practice_mode"]:
@@ -331,6 +332,7 @@ def create_app(run_worker=True):
     def place_order(body: OrderIn):
         """A limit or stop order. It waits until the price reaches it, even while the app is closed."""
         symbol = known(body.symbol)
+        worker.check_splits(symbol)
         order = ledger.place_order(body.account_id, symbol, body.side, body.type, body.shares, body.limit_cents,
                                    body.stop_cents, ref_price_cents=worker.price(symbol), costs=settings.costs())
         worker.orders_changed()

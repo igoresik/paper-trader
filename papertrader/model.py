@@ -295,15 +295,16 @@ def live_signal(symbol, interval):
 def live_record(symbol, interval, threshold):
     """How the signals shown live turned out, once the next bar closed."""
     rows = db.query(
-        "SELECT s.signal, s.close_cents, (SELECT b.close_cents FROM bars b WHERE b.symbol = s.symbol"
+        "SELECT s.ts, s.signal, s.close_cents, (SELECT b.close_cents FROM bars b WHERE b.symbol = s.symbol"
         " AND b.interval = s.interval AND b.ts > s.ts ORDER BY b.ts LIMIT 1) AS next_close"
         " FROM signals s WHERE s.symbol = ? AND s.interval = ?",
         (symbol, interval),
     )
     done = [r for r in rows if r["next_close"] is not None]
-    right = 0
+    right, factor = 0, market.split_factor(symbol)
     for r in done:
-        change = r["next_close"] / r["close_cents"] - 1
+        # a signal keeps the close it was made at; the bars have been split-adjusted since
+        change = r["next_close"] * factor(r["ts"]) / r["close_cents"] - 1
         actual = "BUY" if change > threshold else "SELL" if change < -threshold else "HOLD"
         right += actual == r["signal"]
     return {"n": len(done), "right": right}

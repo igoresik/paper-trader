@@ -1,9 +1,11 @@
+import time
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from papertrader import api, market
+from papertrader import api, db, ledger, market
 
 
 def walk(n=400, seed=0):
@@ -19,6 +21,7 @@ def app(monkeypatch, put_bars):
     monkeypatch.setattr(market, "needs_refresh", lambda *args, **kwargs: False)
     monkeypatch.setattr(market, "refresh", offline)
     monkeypatch.setattr(market, "intraday", offline)
+    monkeypatch.setattr(market, "check_splits", lambda symbol: None)
     put_bars("AAPL", *walk())
     application = api.create_app(run_worker=False)
     application.state.worker.fresh_price = lambda symbol: 15_000  # a live $150.00
@@ -108,6 +111,21 @@ def test_limit_orders_wait_and_can_be_cancelled_once(client):
     assert client.get("/orders", params={"account_id": acc}).json()[0]["id"] == order["id"]
     assert client.delete(f"/orders/{order['id']}").json()["status"] == "CANCELLED"
     assert client.delete(f"/orders/{order['id']}").status_code == 409
+
+
+def test_an_order_on_a_split_day_sees_the_new_share_count(app, client, monkeypatch):
+    acc = open_account(client, cash=1_000_000)
+    ledger.execute_market(acc, "AAPL", "BUY", 10, 30_000, now=int(time.time()) - 3 * 86_400)
+
+    def yahoo_marks_a_split(symbol):
+        with db.tx() as conn:
+            conn.execute("INSERT OR IGNORE INTO splits (symbol, ts, ratio) VALUES (?, ?, 2.0)",
+                         (symbol, market.day_start(time.time())))
+
+    monkeypatch.setattr(market, "check_splits", yahoo_marks_a_split)
+    monkeypatch.setattr(market, "session", lambda now=None: "regular")
+    assert market_order(client, acc, 15, side="SELL").status_code == 200  # 10 old shares are 20 new ones
+    assert ledger.positions(acc)[0]["shares"] == 5
 
 
 def test_settings_are_checked(client):
