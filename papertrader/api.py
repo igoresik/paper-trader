@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import __version__, db, features, ledger, market, model, settings
+from . import __version__, db, features, ledger, market, model, replay, settings
 from .worker import Worker
 
 Side = Literal["BUY", "SELL"]
@@ -64,6 +64,24 @@ class WatchIn(BaseModel):
 
 class ReorderIn(BaseModel):
     symbols: list[str]
+
+
+class ReplayIn(BaseModel):
+    symbol: str
+    start: Annotated[int, Field(gt=0)]  # unix seconds; the replay starts on the first trading day from then
+    starting_cash_cents: Annotated[int, Field(gt=0, le=1_000_000_000_00)] = 100_000_00
+
+
+class ReplayOrderIn(BaseModel):
+    side: Literal["BUY", "SELL"]
+    type: Literal["MARKET", "LIMIT", "STOP"]
+    shares: Annotated[int, Field(ge=1)]
+    limit_cents: Annotated[int, Field(gt=0)] | None = None
+    stop_cents: Annotated[int, Field(gt=0)] | None = None
+
+
+class StepIn(BaseModel):
+    days: Annotated[int, Field(ge=1, le=260)] = 1
 
 
 class SettingsIn(BaseModel):
@@ -236,6 +254,7 @@ def create_app(run_worker=True):
     @app.post("/accounts/{account_id}/reset", tags=["portfolio"])
     def reset_account(account_id: int, body: ResetIn):
         """Archive the portfolio (its history stays readable) and start a fresh one under the same name."""
+        ledger.live_only(account_id)
         fresh = ledger.reset_account(account_id, body.starting_cash_cents)
         if settings.get()["account_id"] == account_id:
             settings.update({"account_id": fresh["id"]})
@@ -287,6 +306,35 @@ def create_app(run_worker=True):
 
         return days, close_on, spy
 
+    @app.get("/replays", tags=["replay"])
+    def list_replays():
+        return [{**r, "state": replay.state(r["id"])} for r in ledger.replays()]
+
+    @app.post("/replays", status_code=201, tags=["replay"])
+    def start_replay(body: ReplayIn):
+        """Trade one symbol's past a day at a time, from the first trading day on or after start."""
+        symbol = known(body.symbol)
+        if market.needs_refresh(symbol, "1d"):
+            market.refresh(symbol, "1d")
+        return replay.start(symbol, body.start, body.starting_cash_cents)
+
+    @app.get("/replays/{account_id}", tags=["replay"])
+    def get_replay(account_id: int):
+        return replay.state(account_id)
+
+    @app.post("/replays/{account_id}/orders", status_code=201, tags=["replay"])
+    def replay_order(account_id: int, body: ReplayOrderIn):
+        """Placed after the day's close: a market order fills at the next open, limits and stops when reached."""
+        return replay.order(account_id, body.side, body.type, body.shares, body.limit_cents, body.stop_cents)
+
+    @app.post("/replays/{account_id}/step", tags=["replay"])
+    def replay_step(account_id: int, body: StepIn):
+        return {"fills": replay.step(account_id, body.days), "state": replay.state(account_id)}
+
+    @app.delete("/replays/{account_id}", status_code=204, tags=["replay"])
+    def close_replay(account_id: int):
+        ledger.archive_replay(account_id)
+
     @app.get("/portfolio/{account_id}/equity", tags=["portfolio"])
     def equity(account_id: int, span: Annotated[str, Query(alias="range")] = "all"):
         """Daily value of the portfolio and of SPY, both indexed to 100 at the start of the range."""
@@ -332,6 +380,7 @@ def create_app(run_worker=True):
         """Market order. Fills now at the live price; while the market is closed it waits for the next open,
         unless Practice mode is on, which fills at the last price."""
         symbol = known(body.symbol)
+        ledger.live_only(body.account_id)
         worker.check_splits(symbol)  # on a split day, before the shares held are checked
         costs, prefs = settings.costs(), settings.get()
         price, practice = worker.fresh_price(symbol), False
@@ -356,6 +405,7 @@ def create_app(run_worker=True):
     def place_order(body: OrderIn):
         """A limit or stop order. It waits until the price reaches it, even while the app is closed."""
         symbol = known(body.symbol)
+        ledger.live_only(body.account_id)
         worker.check_splits(symbol)
         order = ledger.place_order(body.account_id, symbol, body.side, body.type, body.shares, body.limit_cents,
                                    body.stop_cents, ref_price_cents=worker.price(symbol), costs=settings.costs())
@@ -416,11 +466,15 @@ def create_app(run_worker=True):
         symbol: str, interval: Literal["1m", "5m", "1h", "1d", "1w"] = "1d",
         span: Annotated[str, Query(alias="range")] = "1y",
         ma1: str = "ema:20", ma2: str = "sma:50", bb: str = "20:2", rsi: str = "14", macd: str = "12:26:9",
-        account_id: int | None = None,
+        account_id: int | None = None, until: int | None = None,
     ):
-        """Bars (cents), the requested indicators, the model's out-of-sample and live calls, and your own fills."""
+        """Bars (cents), the requested indicators, the model's out-of-sample and live calls, and your own fills.
+        until cuts the chart off at that bar, for a replay."""
         symbol = known(symbol)
-        worker.watch(symbol)
+        if until is None:
+            worker.watch(symbol)
+        elif interval in MINUTE_RANGES:
+            raise HTTPException(422, "A replay shows daily or weekly bars.")
         if interval in MINUTE_RANGES:
             periods = MINUTE_RANGES[interval]
             if span not in periods:
@@ -433,14 +487,16 @@ def create_app(run_worker=True):
             if market.needs_refresh(symbol, base):
                 market.refresh(symbol, base)
             bars = market.frame(symbol, base)
-            live = worker.live_bar(symbol, base)
+            if until is not None:
+                bars = bars[bars.index <= until]
+            live = worker.live_bar(symbol, base) if until is None else None
             forming = bool(live) and (bars.empty or int(live["ts"]) > int(bars.index[-1]))
             if forming:
                 row = {k: live[k] / 100 for k in ("open", "high", "low", "close")} | {"volume": float(live["volume"])}
                 bars = pd.concat([bars, pd.DataFrame([row], index=[live["ts"]])])
             if interval == "1w":
                 bars = _weekly(bars)
-            since = _since(span)
+            since = _since(span, until)
         close = bars["close"]
         prices, points = {}, {}  # lines in dollars (sent as cents), and RSI in points
         for key, spec in (("ma1", ma1), ("ma2", ma2)):
@@ -469,9 +525,9 @@ def create_app(run_worker=True):
         if interval in ("1d", "1h") and (chosen := model.active(symbol, interval)):
             calls = db.query(
                 "SELECT ts, signal, confidence, 'backtest' AS kind FROM predictions WHERE model_id = ? AND ts >= ?"
-                " AND signal != 'HOLD' UNION ALL SELECT ts, signal, confidence, 'live' FROM signals"
-                " WHERE symbol = ? AND interval = ? AND ts >= ? AND signal != 'HOLD' ORDER BY ts",
-                (chosen["id"], cutoff, symbol, interval, cutoff),
+                " AND ts <= ? AND signal != 'HOLD' UNION ALL SELECT ts, signal, confidence, 'live' FROM signals"
+                " WHERE symbol = ? AND interval = ? AND ts >= ? AND ts <= ? AND signal != 'HOLD' ORDER BY ts",
+                (chosen["id"], cutoff, until or 2**62, symbol, interval, cutoff, until or 2**62),
             )
         fills, position, orders = [], None, []
         if account_id is not None:
@@ -567,7 +623,7 @@ def create_app(run_worker=True):
     def put_settings(body: SettingsIn):
         changes = body.model_dump(exclude_unset=True, exclude_none=True)  # a null would wipe out the default
         if changes.get("account_id") is not None:
-            ledger.account(changes["account_id"])
+            ledger.live_only(changes["account_id"])
         return settings.update(changes)
 
     @app.get("/status", tags=["app"])

@@ -75,6 +75,15 @@ UPGRADES = [
     ALTER TABLE trades ADD COLUMN slippage_cents INTEGER NOT NULL DEFAULT 0 CHECK (slippage_cents >= 0);
     PRAGMA user_version = 3;
     """,
+    """
+    -- a replay is a portfolio that trades one symbol's past a day at a time; replay_at is its clock, the latest
+    -- daily bar it can see. Live portfolios have neither, and their names stay unique among themselves.
+    ALTER TABLE accounts ADD COLUMN replay_symbol TEXT;
+    ALTER TABLE accounts ADD COLUMN replay_at INTEGER;
+    DROP INDEX account_name;
+    CREATE UNIQUE INDEX account_name ON accounts (name) WHERE archived_at IS NULL AND replay_at IS NULL;
+    PRAGMA user_version = 4;
+    """,
 ]
 
 

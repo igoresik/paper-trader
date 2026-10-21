@@ -86,8 +86,46 @@ def account(account_id):
 
 
 def accounts(include_archived=False):
-    where = "" if include_archived else " WHERE archived_at IS NULL"
-    return db.query(f"SELECT * FROM accounts{where} ORDER BY id")
+    """Live portfolios; replays are listed by replays()."""
+    where = "replay_at IS NULL" + ("" if include_archived else " AND archived_at IS NULL")
+    return db.query(f"SELECT * FROM accounts WHERE {where} ORDER BY id")
+
+
+def live_only(account_id):
+    """Refuse a replay where only a live portfolio makes sense."""
+    acct = account(account_id)
+    if acct["replay_at"] is not None:
+        raise LedgerError(f"{acct['name']} is a replay: trade it from the Replay view.")
+    return acct
+
+
+def replays():
+    return db.query("SELECT * FROM accounts WHERE replay_at IS NOT NULL AND archived_at IS NULL ORDER BY id DESC")
+
+
+def open_replay(symbol, start_ts, cash):
+    with db.tx() as conn:
+        if cash <= 0:
+            raise LedgerError("Starting cash has to be more than $0.00.")
+        day = time.strftime("%Y-%m-%d", time.gmtime(start_ts + 43_200))
+        return _rows(
+            conn,
+            "INSERT INTO accounts (name, starting_cash_cents, cash_balance_cents, created_at, replay_symbol, replay_at)"
+            " VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+            (f"{symbol} from {day}", cash, cash, start_ts, symbol, start_ts),
+        )[0]
+
+
+def move_replay_clock(account_id, ts):
+    with db.tx() as conn:
+        conn.execute("UPDATE accounts SET replay_at = ? WHERE id = ? AND replay_at IS NOT NULL", (ts, account_id))
+
+
+def archive_replay(account_id, now=None):
+    with db.tx() as conn:
+        conn.execute("UPDATE orders SET status = 'CANCELLED', reason = 'The replay was closed.', closed_at = ?"
+                     " WHERE account_id = ? AND status = 'OPEN'", (now or _now(), account_id))
+        conn.execute("UPDATE accounts SET archived_at = ? WHERE id = ? AND replay_at IS NOT NULL", (now or _now(), account_id))
 
 
 def _live_account(conn, account_id):
@@ -339,10 +377,13 @@ def _reject(order, reason, now):
     return None
 
 
-def match(symbol, bars, costs=Costs()):
-    """Fill the symbol's open orders against bars (oldest first), booking fills in the order they happened."""
+def match(symbol, bars, costs=Costs(), account_id=None):
+    """Fill the symbol's open orders against bars (oldest first), booking fills in the order they happened.
+    Live prices only reach live portfolios; a replay passes its own account_id with the day it moves to."""
     hits = []
-    for order in db.query("SELECT * FROM orders WHERE symbol = ? AND status = 'OPEN'", (symbol,)):
+    whose = ("o.account_id = ?", (symbol, account_id)) if account_id else ("a.replay_at IS NULL", (symbol,))
+    for order in db.query("SELECT o.* FROM orders o JOIN accounts a ON a.id = o.account_id"
+                          f" WHERE o.symbol = ? AND o.status = 'OPEN' AND {whose[0]}", whose[1]):
         for bar in bars:
             # a bar that began before the order existed may have traded before it, so it doesn't count
             if bar["ts"] >= order["created_at"] and (price := trigger_price(order, bar)) is not None:
@@ -385,7 +426,9 @@ def apply_splits(symbol, now=None):
             ts, ratio, name = split["ts"], split["ratio"], _split_name(split["ratio"])
             last = _rows(conn, "SELECT close_cents FROM bars WHERE symbol = ? AND interval = '1d' AND ts < ?"
                                " ORDER BY ts DESC LIMIT 1", (symbol, ts))
-            for pos in _rows(conn, "SELECT * FROM positions WHERE symbol = ?", (symbol,)):
+            # replays trade on bars that are already split-adjusted, so only live portfolios move
+            for pos in _rows(conn, "SELECT p.* FROM positions p JOIN accounts a ON a.id = p.account_id"
+                                   " WHERE p.symbol = ? AND a.replay_at IS NULL", (symbol,)):
                 since = _rows(conn, "SELECT COALESCE(SUM(CASE side WHEN 'BUY' THEN shares ELSE -shares END), 0) AS n"
                                     " FROM trades WHERE account_id = ? AND symbol = ? AND executed_at >= ?",
                               (pos["account_id"], symbol, ts))[0]["n"]
@@ -407,7 +450,8 @@ def apply_splits(symbol, now=None):
                              (pos["account_id"], symbol, ts, ratio, before, after, cash))
                 changes.append({"symbol": symbol, "account_id": pos["account_id"], "split": name,
                                 "shares_before": before, "shares_after": after, "cash_cents": cash})
-            for order in _rows(conn, "SELECT * FROM orders WHERE symbol = ? AND status = 'OPEN' AND created_at < ?",
+            for order in _rows(conn, "SELECT o.* FROM orders o JOIN accounts a ON a.id = o.account_id"
+                                     " WHERE o.symbol = ? AND o.status = 'OPEN' AND o.created_at < ? AND a.replay_at IS NULL",
                                (symbol, ts)):
                 shares = _whole(order["shares"] * ratio)
                 if not shares:
@@ -541,7 +585,8 @@ def _walk(account_id, days, close_on):
     trades = db.query("SELECT symbol, side, shares, total_cents, executed_at FROM trades WHERE account_id = ?",
                       (account_id,))
     paid = db.query("SELECT * FROM split_changes WHERE account_id = ?", (account_id,))
-    factor = {s: market.split_factor(s) for s in {t["symbol"] for t in trades}}
+    replay = acct["replay_at"] is not None  # a replay trades split-adjusted prices, already on today's count
+    factor = {s: (lambda ts: 1) if replay else market.split_factor(s) for s in {t["symbol"] for t in trades}}
     moves = sorted(
         [(t["executed_at"], t["symbol"], t["shares"] * factor[t["symbol"]](t["executed_at"]), -t["total_cents"])
          if t["side"] == "BUY" else
