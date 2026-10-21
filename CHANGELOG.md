@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0 (not released yet)
+
+- New runs also read the volatility regime: the last 5 days' swings against the last 60's, and the latest 1- and 5-day moves measured in those swings.
+
 ## 1.1.0 (2026-10-21)
 
 - The signal card says **No clear edge** when a call hasn't beaten how often that outcome happens anyway, and the watchlist badge goes grey.

@@ -190,7 +190,7 @@ export interface RunParams {
   folds: number;
   min_confidence: number;
   cost_bps: number;
-  indicators: { rsi: number; ema_fast: number; ema_slow: number; bb: number; bb_k: number; vol: number; context?: boolean };
+  indicators: { rsi: number; ema_fast: number; ema_slow: number; bb: number; bb_k: number; vol: number; context?: boolean; regime?: boolean };
 }
 
 export interface Run {

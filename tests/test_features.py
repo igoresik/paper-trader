@@ -43,9 +43,10 @@ def test_ema_spread_is_measured_per_dollar():
 def test_features_never_look_ahead():
     close, volume = random_walk(400)
     volume.iloc[300:] *= 10  # a later regime that whole-history statistics would leak backwards
-    full = features.indicators(close, volume)
-    early = features.indicators(close[:300], volume[:300])
-    pd.testing.assert_frame_equal(full.iloc[:300], early)
+    for p in (Params(), Params(context=True, regime=True)):
+        full = features.indicators(close, volume, p)
+        early = features.indicators(close[:300], volume[:300], p)
+        pd.testing.assert_frame_equal(full.iloc[:300], early)
 
 
 def test_labels_use_the_threshold_both_ways():
@@ -76,6 +77,18 @@ def test_market_context_adds_momentum_and_the_columns_it_is_given():
     assert table["ret_5"].iloc[10] == pytest.approx(close.iloc[10] / close.iloc[5] - 1)
     assert {"vix", "vix_change", "yield_change"} <= set(table.columns)
     assert "vix" not in features.indicators(close, volume, Params(context=True), None).columns
+
+
+def test_regime_inputs_measure_moves_in_units_of_recent_volatility():
+    close, volume = random_walk(200)
+    assert "vol_ratio" not in features.indicators(close, volume, Params()).columns  # older runs stay as they were
+    table = features.indicators(close, volume, Params(regime=True))
+    step = close.pct_change()
+    assert table["vol_ratio"].iloc[150] == pytest.approx(step.iloc[146:151].std() / step.iloc[91:151].std())
+    assert table["ret_z"].iloc[150] == pytest.approx(step.iloc[150] / step.iloc[131:151].std())
+    calm, wild = features.indicators(close, volume, Params(regime=True)), features.indicators(
+        close.iloc[0] * (close / close.iloc[0]) ** 3, volume, Params(regime=True))  # same path, three times the swings
+    assert wild["ret_5_z"].iloc[150] == pytest.approx(calm["ret_5_z"].iloc[150], rel=0.1)
 
 
 def test_a_move_counts_as_big_when_it_beats_the_usual_size_known_before_it():
