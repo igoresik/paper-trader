@@ -367,10 +367,12 @@ def create_app(run_worker=True):
     recent = {}  # (symbol, interval, period) -> (fetched at, bars): minute bars from Yahoo, reused for a minute
 
     def minute_frame(symbol, interval, period):
-        key = (symbol, interval, period)
-        if key not in recent or time.time() - recent[key][0] > 60:
-            recent[key] = (time.time(), market.intraday([symbol], period, interval).get(symbol, []))
-        merged = {r["ts"]: r for r in recent[key][1]}
+        key, now = (symbol, interval, period), time.time()
+        for stale in [k for k, (at, _) in list(recent.items()) if now - at > 60]:  # charts looked at once don't pile up
+            recent.pop(stale, None)
+        if not (entry := recent.get(key)):  # held here, so another request clearing it can't pull it away
+            entry = recent[key] = (now, market.intraday([symbol], period, interval).get(symbol, []))
+        merged = {r["ts"]: r for r in entry[1]}
         for bar in worker.session_bars(symbol, interval):  # the stream is fresher than Yahoo for today
             if old := merged.get(bar["ts"]):  # Yahoo saw the bar open; the stream saw its latest price
                 bar = {**bar, "open": old["open"], "high": max(old["high"], bar["high"]),
