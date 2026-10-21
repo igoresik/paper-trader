@@ -144,3 +144,13 @@ def test_a_call_counts_only_when_it_beats_how_often_that_happens_anyway():
     predictions(3, [("SELL", 0.6, "SELL")] * 10 + [("HOLD", 0.5, "HOLD")] * 90)
     assert not model.call(3, "SELL", 0.6)["clear"]  # 10 of 10, but 10 calls prove little
     assert not model.call(3, "BUY", 0.6)["clear"]  # never made out of sample
+
+
+def test_following_the_live_signals_buys_only_on_buy_days(put_bars):
+    put_bars("SPY", [100.0, 101.0, 98.98, 103.929])  # +1%, -2%, +5%
+    with db.tx() as conn:
+        conn.execute("INSERT INTO models (id, symbol, interval, params, metrics) VALUES (1, 'SPY', '1d', '{}', '{}')")
+        conn.executemany("INSERT INTO signals VALUES ('SPY', '1d', ?, ?, ?, 0.5, 0.5, 0.3, 0.2, 1)",
+                         [(1_600_000_000, 10_000, "BUY"), (1_600_086_400, 10_100, "BUY"), (1_600_172_800, 9_898, "SELL")])
+    followed = model.follow("SPY", since=1_600_000_000)
+    assert followed["days"] == 3 and round(followed["return"], 4) == round(1.01 * 0.98 - 1, 4)

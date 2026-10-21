@@ -212,6 +212,7 @@ def _fill(conn, order, price_cents, now, costs, slip):
     acct = _live_account(conn, order["account_id"])
     side, symbol, shares = order["side"], order["symbol"], order["shares"]
     price, fee, total = fill_terms(side, shares, price_cents, costs, slip)
+    slipped = abs(price - price_cents) * shares
     realized = None
     if side == "BUY":
         _check_cash(conn, acct, symbol, total, order["id"])
@@ -246,8 +247,9 @@ def _fill(conn, order, price_cents, now, costs, slip):
     trade = _rows(
         conn,
         "INSERT INTO trades (order_id, account_id, symbol, side, shares, price_cents, commission_cents, total_cents,"
-        " realized_pnl_cents, cash_after_cents, executed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
-        (order["id"], acct["id"], symbol, side, shares, price, fee, total, realized, cash_after, now),
+        " realized_pnl_cents, cash_after_cents, executed_at, slippage_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " RETURNING *",
+        (order["id"], acct["id"], symbol, side, shares, price, fee, total, realized, cash_after, now, slipped),
     )[0]
     return {**trade, "type": order["type"]}
 
@@ -501,6 +503,38 @@ def portfolio(account_id, price, prev_close, day_start):
 def equity_curve(account_id, days, close_on):
     """Portfolio value at each day's close: cash then, plus the shares held then at that day's closing price.
     days are (daily bar start, moment of that day's close); close_on(symbol, day) gives cents."""
+    return [value for value, _ in _walk(account_id, days, close_on)]
+
+
+def max_drawdown(values):
+    """The biggest fall from a peak, as a share of that peak: -0.1 is 10% down from the best close before it."""
+    peak, worst = None, 0.0
+    for value in values:
+        peak = value if peak is None else max(peak, value)
+        worst = min(worst, value / peak - 1) if peak else worst
+    return worst
+
+
+def report_card(account_id, days, close_on):
+    """The trader's own record: how often a sale made money, how big wins and losses were, what costs took,
+    and the share of days with money in the market."""
+    sold = [r["realized_pnl_cents"] for r in db.query(
+        "SELECT realized_pnl_cents FROM trades WHERE account_id = ? AND side = 'SELL'", (account_id,))]
+    wins, losses = [p for p in sold if p > 0], [p for p in sold if p < 0]
+    costs = db.query("SELECT COALESCE(SUM(commission_cents), 0) AS fees, COALESCE(SUM(slippage_cents), 0) AS slip"
+                     " FROM trades WHERE account_id = ?", (account_id,))[0]
+    invested = [held for _, held in _walk(account_id, days, close_on)]
+    return {
+        "sells": len(sold), "wins": len(wins),
+        "avg_win_cents": round(sum(wins) / len(wins)) if wins else None,
+        "avg_loss_cents": round(sum(losses) / len(losses)) if losses else None,
+        "commission_cents": costs["fees"], "slippage_cents": costs["slip"],
+        "time_in_market": sum(invested) / len(invested) if invested else None,  # None before the first close
+    }
+
+
+def _walk(account_id, days, close_on):
+    """(value, holding anything) at each day's close."""
     acct = account(account_id)
     # cash_after_cents follows booking order, and a catch-up fill can be booked after a later one, so add up totals.
     # Closes are split-adjusted, so shares count on today's share count: (moment, symbol, shares, cash) per change
@@ -522,5 +556,6 @@ def equity_curve(account_id, days, close_on):
         while done < len(moves) and moves[done][0] <= closed_at:
             _, symbol, shares, money_in = moves[done]
             held[symbol], cash, done = held.get(symbol, 0) + shares, cash + money_in, done + 1
-        values.append(cash + round(sum(n * (close_on(symbol, day) or 0) for symbol, n in held.items() if abs(n) > 1e-9)))
+        holding = {symbol: n for symbol, n in held.items() if abs(n) > 1e-9}
+        values.append((cash + round(sum(n * (close_on(symbol, day) or 0) for symbol, n in holding.items())), bool(holding)))
     return values

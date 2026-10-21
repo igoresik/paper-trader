@@ -70,6 +70,11 @@ UPGRADES = [
     ) WITHOUT ROWID;
     PRAGMA user_version = 2;
     """,
+    """
+    -- what slippage cost each fill, for the trader's report card (fills from before this step show 0)
+    ALTER TABLE trades ADD COLUMN slippage_cents INTEGER NOT NULL DEFAULT 0 CHECK (slippage_cents >= 0);
+    PRAGMA user_version = 3;
+    """,
 ]
 
 

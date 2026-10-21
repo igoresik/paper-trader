@@ -201,6 +201,16 @@ def test_watchlist_keeps_its_order(client, put_bars):
     assert [i["symbol"] for i in client.put("/watchlist", json={"symbols": ["MSFT", "AAPL"]}).json()] == ["MSFT", "AAPL"]
 
 
+def test_report_card_sums_up_the_traders_record(client):
+    acc = open_account(client)
+    market_order(client, acc, 2)
+    market_order(client, acc, 1, side="SELL")
+    card = client.get(f"/portfolio/{acc}/report").json()
+    assert (card["sells"], card["wins"], card["commission_cents"]) == (1, 0, 0)  # bought and sold at the same price
+    assert card["model"] == {"return": 0.0, "days": 0}
+    assert card["since"] is None and card["time_in_market"] is None  # no close yet to measure from
+
+
 def test_equity_curve_starts_at_100(client):
     acc = open_account(client)
     assert client.get(f"/portfolio/{acc}/equity").json()["equity_index"][0] == 100

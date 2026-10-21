@@ -369,3 +369,26 @@ def test_equity_curve_counts_old_shares_on_the_new_count():
 @pytest.mark.parametrize("cents, text", [(0, "$0.00"), (5, "$0.05"), (123_456_789, "$1,234,567.89"), (-1_050, "-$10.50")])
 def test_money(cents, text):
     assert ledger.money(cents) == text
+
+
+def test_fills_record_the_slippage_they_paid():
+    acc = account()
+    trade = buy(acc, 10, 1_000, costs=Costs(slippage_bps=100))
+    assert (trade["price_cents"], trade["slippage_cents"]) == (1_010, 100)
+    order = ledger.place_order(acc, "AAPL", "SELL", "LIMIT", 5, limit_cents=1_200, now=T0)
+    filled = ledger.match("AAPL", [bar(T0 + 60, 1_250)], Costs(slippage_bps=100))[0]
+    assert (filled["order_id"], filled["slippage_cents"]) == (order["id"], 0)  # limits fill at their price
+
+
+def test_report_card_scores_the_trader():
+    acc = account(100_000)
+    fee = Costs(commission_cents=100)
+    buy(acc, 10, 1_000, costs=fee, now=T0 + 100)
+    sell(acc, 5, 1_200, costs=fee, now=T0 + 86_400 + 100)  # +$8.50 after costs
+    sell(acc, 5, 900, costs=fee, now=T0 + 2 * 86_400 + 100)  # -$6.50
+    days = [(T0 + d * 86_400, T0 + d * 86_400 + 1_000) for d in range(3)]
+    closes = {T0: 1_000, T0 + 86_400: 1_200, T0 + 2 * 86_400: 900}
+    card = ledger.report_card(acc, days, lambda symbol, day: closes[day])
+    assert card == {"sells": 2, "wins": 1, "avg_win_cents": 850, "avg_loss_cents": -650,
+                    "commission_cents": 300, "slippage_cents": 0, "time_in_market": 2 / 3}
+    assert ledger.max_drawdown([100_000, 99_900, 101_800, 100_200]) == 100_200 / 101_800 - 1
