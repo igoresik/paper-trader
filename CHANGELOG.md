@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.1 (not released yet)
+## 1.2.1 (2026-10-21)
 
 - A Buy or Sell call now also has to beat how often its direction came anyway on the days that moved. SPY went up on about 54% of them, so Buy calls that were right 55% of the time no longer show as a clear call.
 
