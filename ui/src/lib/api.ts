@@ -90,7 +90,7 @@ export interface WatchItem {
   price_cents: number | null;
   prev_close_cents: number | null;
   quote: Quote | null;
-  signal: { signal: Call; confidence: number; ts: number } | null;
+  signal: { signal: Call; confidence: number; ts: number; clear: boolean } | null;
 }
 
 export interface Scores {
@@ -127,6 +127,10 @@ export interface SignalReport {
   indicators: Record<"rsi" | "ema_spread" | "vol_z" | "pct_b" | "bb_width", number>;
   model: { id: number; created_at: number; estimator: string; threshold: number; summary: Summary };
   band: Band | null;
+  /** how often this outcome happened anyway, out of sample */
+  base_rate: number;
+  /** right clearly more often than base_rate in its confidence band */
+  clear: boolean;
   live_record: { n: number; right: number };
   price_cents: number | null;
 }
