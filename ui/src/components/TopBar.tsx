@@ -35,6 +35,11 @@ function Market() {
         <i className={cx("size-1.5 rounded-full", s.stream === "live" ? "bg-buy" : "bg-warn")} aria-hidden />
         {stream}
       </span>
+      {s.update && (
+        <a href={s.update.url} target="_blank" rel="noreferrer" className="text-buy hover:underline">
+          Version {s.update.version} is out
+        </a>
+      )}
     </div>
   );
 }

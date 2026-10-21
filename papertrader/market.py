@@ -24,6 +24,22 @@ OFFLINE = "Can't reach Yahoo Finance. Check the internet connection."
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # its errors resurface as MarketError messages
 
 
+_heard = {"answered": 0.0, "failed": 0.0}  # when Yahoo last answered, and when a request last failed
+
+
+def _answered():
+    _heard["answered"] = time.time()
+
+
+def _failed():
+    _heard["failed"] = time.time()
+
+
+def yahoo_down():
+    """The latest request to Yahoo failed, in the last ten minutes."""
+    return _heard["failed"] > _heard["answered"] and time.time() - _heard["failed"] < 600
+
+
 class MarketError(Exception):
     """A market data problem, written for the user."""
 
@@ -59,13 +75,18 @@ def _ticker(symbol):  # swapped for a fake in tests
 
 def _history(ticker, symbol, **kw):
     try:
-        return ticker.history(raise_errors=True, **kw)
+        frame = ticker.history(raise_errors=True, **kw)
     except (yfe.YFPricesMissingError, yfe.YFTickerMissingError, yfe.YFTzMissingError):
+        _answered()  # Yahoo is fine; it just has nothing for this symbol
         raise UnknownSymbol(f"No market data found for {symbol}.") from None
     except yfe.YFRateLimitError:
+        _failed()
         raise MarketError("Yahoo Finance is limiting requests right now. Try again in a minute.") from None
     except Exception as error:  # network trouble arrives as many exception types
+        _failed()
         raise MarketError(OFFLINE) from error
+    _answered()
+    return frame
 
 
 def _tradable(symbol, meta):
@@ -209,7 +230,9 @@ def intraday(symbols, period="1d", interval="1m"):
         data = yf.download(symbols, period=period, interval=interval, group_by="ticker", auto_adjust=False,
                            prepost=False, progress=False, threads=True)
     except Exception as error:
+        _failed()
         raise MarketError(OFFLINE) from error
+    _answered()
     found = {}
     for symbol in set(symbols) & set(data.columns.get_level_values(0)):
         rows = data[symbol].dropna(subset=["Close"])

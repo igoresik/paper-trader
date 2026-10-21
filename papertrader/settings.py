@@ -10,6 +10,7 @@ DEFAULTS = {
     "slippage_bps": 0,
     "practice_mode": False,  # fill market orders at the last price while the market is closed
     "confirm_orders": True,
+    "check_updates": True,  # one request to GitHub per start
     "theme": "system",
     "updown": "green-red",
     "account_id": None,

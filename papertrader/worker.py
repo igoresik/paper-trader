@@ -12,7 +12,7 @@ import websockets
 from google.protobuf.json_format import MessageToDict
 from yfinance.pricing_pb2 import PricingData
 
-from . import db, features, ledger, market, model, settings
+from . import db, features, ledger, market, model, settings, updates
 
 log = logging.getLogger("papertrader")
 STREAM = "wss://streamer.finance.yahoo.com/?version=2"
@@ -43,6 +43,7 @@ class Worker:
         self.ticks = {}  # symbol -> ticks waiting for the matcher
         self._ticks_lock = threading.Lock()
         self.split_checked = {}  # symbol -> the day its splits were last checked
+        self.update = None  # a newer release, once checked
         self.loop = None
         self._wake = None
         self._tasks = []
@@ -98,11 +99,14 @@ class Worker:
             self.loop.call_soon_threadsafe(self._wake.set)
 
     def status(self):
-        return {"session": market.session(), "stream": self.stream, "live": self.market_live()}
+        return {"session": market.session(), "stream": self.stream, "live": self.market_live(),
+                "yahoo": "down" if market.yahoo_down() else "ok", "update": self.update}
 
     # history and signals
 
     async def _housekeeping(self):
+        if settings.get()["check_updates"]:
+            self.update = await self._run(updates.newer)
         for symbol in sorted(self.symbols()):
             await self._run(self.update_history, symbol)
         await self._run(self.seed, "5d")
