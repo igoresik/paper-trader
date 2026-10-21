@@ -91,6 +91,7 @@ class SettingsIn(BaseModel):
     slippage_bps: Annotated[int, Field(ge=0, le=500)] | None = None
     practice_mode: bool | None = None
     confirm_orders: bool | None = None
+    check_updates: bool | None = None
     theme: Literal["system", "dark", "light"] | None = None
     updown: Literal["green-red", "red-green", "blue-orange"] | None = None
     account_id: int | None = None

@@ -103,6 +103,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         <Switch checked={settings.practice_mode} onChange={(v) => save({ practice_mode: v })} label="Practice mode: fill market orders at the last price while the market is closed" />
         <p className="text-[12px] text-ink-3">Off is how brokers work: an order placed while the market is closed waits for the next open. Practice mode is handy for learning outside US hours, but the fills are at stale prices.</p>
       </Section>
+      <Section title="Updates">
+        <Switch checked={settings.check_updates} onChange={(v) => save({ check_updates: v })} label="Check GitHub for a new version when the app starts" />
+        <p className="text-[12px] text-ink-3">One request to GitHub per start. Nothing about you or your trades is sent.</p>
+      </Section>
       <Section title="Look">
         <Row label="Theme">
           <Segmented size="sm" label="Theme" value={settings.theme} onChange={(theme) => save({ theme })} options={[{ value: "system", label: "Like Windows" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />

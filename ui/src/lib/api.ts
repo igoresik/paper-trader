@@ -282,6 +282,7 @@ export interface Settings {
   slippage_bps: number;
   practice_mode: boolean;
   confirm_orders: boolean;
+  check_updates: boolean;
   theme: "system" | "dark" | "light";
   updown: "green-red" | "red-green" | "blue-orange";
   account_id: number | null;
@@ -293,6 +294,10 @@ export interface Status {
   session: "pre" | "regular" | "post" | "closed";
   stream: "connecting" | "live" | "reconnecting" | "offline";
   live: boolean;
+  /** down when the latest request to Yahoo failed in the last ten minutes */
+  yahoo?: "ok" | "down";
+  /** a newer release, when the update check found one */
+  update?: { version: string; url: string } | null;
 }
 
 export class ApiError extends Error {
