@@ -23,7 +23,7 @@ export const DEFAULT_CHART: ChartPrefs = {
   orders: true,
 };
 
-export type View = "trade" | "portfolio" | "lab";
+export type View = "trade" | "portfolio" | "replay" | "lab";
 export interface Preset {
   side: Side;
   shares?: number;

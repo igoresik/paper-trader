@@ -12,6 +12,9 @@ export interface Account {
   cash_balance_cents: number;
   created_at: number;
   archived_at: number | null;
+  /** set on replays only */
+  replay_symbol?: string | null;
+  replay_at?: number | null;
 }
 
 export interface Position {
@@ -221,7 +224,7 @@ export interface Equity {
   benchmark_index: (number | null)[];
 }
 
-export interface ReportCard {
+export interface ReportBase {
   sells: number;
   wins: number;
   avg_win_cents: number | null;
@@ -235,9 +238,25 @@ export interface ReportCard {
   /** first day of the comparison */
   since: number | null;
   return: number | null;
-  spy_return: number | null;
-  /** going long on SPY's live buy signals over the same days */
+  /** going long on the model's buy calls over the same days */
   model: { return: number; days: number };
+}
+
+export interface ReportCard extends ReportBase {
+  spy_return: number | null;
+}
+
+export interface ReplayState {
+  account: Account;
+  symbol: string;
+  /** the latest daily bar the replay can see */
+  clock: number;
+  days_played: number;
+  days_left: number;
+  portfolio: Portfolio;
+  orders: Order[];
+  /** model: the active model's out-of-sample calls over the same days */
+  report: ReportBase & { benchmark_return: number };
 }
 
 export interface ChartPrefs {
@@ -341,7 +360,7 @@ export const api = {
   cancelOrder: (id: number) => call<Order>("DELETE", `/orders/${id}`),
   search: (text: string) => call<{ symbol: string; name: string; kind: string }[]>("GET", `/market/search${q({ q: text })}`),
   signal: (symbol: string, interval: "1d" | "1h") => call<SignalReport>("GET", `/market/${symbol}/signal${q({ interval })}`),
-  chart: (symbol: string, prefs: ChartPrefs, accountId: number | null) =>
+  chart: (symbol: string, prefs: ChartPrefs, accountId: number | null, until?: number) =>
     call<ChartData>(
       "GET",
       `/market/${symbol}/chart${q({
@@ -353,8 +372,17 @@ export const api = {
         rsi: prefs.rsi.on ? String(prefs.rsi.period) : "",
         macd: prefs.macd.on ? "12:26:9" : "",
         account_id: accountId,
+        until,
       })}`,
     ),
+  replays: () => call<(Account & { state: ReplayState })[]>("GET", "/replays"),
+  startReplay: (symbol: string, start: number, cash: number) =>
+    call<ReplayState>("POST", "/replays", { symbol, start, starting_cash_cents: cash }),
+  replay: (id: number) => call<ReplayState>("GET", `/replays/${id}`),
+  replayOrder: (id: number, body: { side: Side; type: OrderType; shares: number; limit_cents?: number; stop_cents?: number }) =>
+    call<Order>("POST", `/replays/${id}/orders`, body),
+  stepReplay: (id: number, days: number) => call<{ fills: Trade[]; state: ReplayState }>("POST", `/replays/${id}/step`, { days }),
+  closeReplay: (id: number) => call<void>("DELETE", `/replays/${id}`),
   watchlist: () => call<WatchItem[]>("GET", "/watchlist"),
   watch: (symbol: string) => call<WatchItem>("POST", "/watchlist", { symbol }),
   unwatch: (symbol: string) => call<void>("DELETE", `/watchlist/${symbol}`),
