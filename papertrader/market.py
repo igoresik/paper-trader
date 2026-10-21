@@ -18,7 +18,9 @@ from . import db
 NY = ZoneInfo("America/New_York")
 CLOSE = clock(16, 0)
 SETTLE = 600  # Yahoo finalises a bar a few minutes after it ends
-PERIODS = {"1d": "5y", "1h": "730d"}  # 730 days is as far back as Yahoo serves hourly bars
+# all the daily history there is: a model tested on 30 years of SPY did better in recent years too than one on 5;
+# 730 days is as far back as Yahoo serves hourly bars
+PERIODS = {"1d": "max", "1h": "730d"}
 SYMBOL = re.compile(r"[A-Z][A-Z0-9.\-]{0,9}")
 OFFLINE = "Can't reach Yahoo Finance. Check the internet connection."
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # its errors resurface as MarketError messages

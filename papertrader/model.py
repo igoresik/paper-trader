@@ -136,12 +136,16 @@ def edge_range(oos, tries=1, resamples=2_000, block=20, seed=0):
     same data is another chance to look good by luck, so the range widens with the number of tries."""
     n = len(oos)
     starts = np.random.default_rng(seed).integers(0, max(n - block, 0) + 1, (resamples, -(-n // block)))
-    days = np.minimum((starts[:, :, None] + np.arange(block)).reshape(resamples, -1)[:, :n], n - 1)
-    actual = oos["actual"].to_numpy()[days]
-    best = np.max([_balanced(actual, oos[name].to_numpy()[days]) for name in ("majority", "always_buy", "yesterday")],
-                  axis=0)
+    columns = {name: oos[name].to_numpy().astype(np.int8) for name in ("actual", "pred", "majority", "always_buy", "yesterday")}
+    edges = []
+    # 30 years of days times 2,000 resamples is too big for one array, so a batch at a time; same answer either way
+    for batch in np.array_split(starts, max(1, resamples * n // 2_000_000)):
+        days = np.minimum((batch[:, :, None] + np.arange(block)).reshape(len(batch), -1)[:, :n], n - 1)
+        actual = columns["actual"][days]
+        best = np.max([_balanced(actual, columns[name][days]) for name in ("majority", "always_buy", "yesterday")], axis=0)
+        edges.append(_balanced(actual, columns["pred"][days]) - best)
     alpha = 0.05 / tries
-    low, high = np.quantile(_balanced(actual, oos["pred"].to_numpy()[days]) - best, [alpha / 2, 1 - alpha / 2])
+    low, high = np.quantile(np.concatenate(edges), [alpha / 2, 1 - alpha / 2])
     return float(low), float(high)
 
 

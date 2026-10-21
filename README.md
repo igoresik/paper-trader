@@ -86,7 +86,7 @@ Then open http://127.0.0.1:8000, or run `.venv\Scripts\python launcher.py` for t
 
 Command line:
 
-- `python -m papertrader ingest SPY` downloads five years of daily bars and stores their indicators (`--interval 1h` for hourly).
+- `python -m papertrader ingest SPY` downloads all of SPY's daily bars (back to 1993) and stores their indicators (`--interval 1h` for the last two years of hourly bars).
 - `python -m papertrader train SPY` runs the walk-forward test and prints each fold, the baselines and the backtest against buy-and-hold (`--activate` makes it the live model).
 
 The API is documented at http://127.0.0.1:8000/docs.

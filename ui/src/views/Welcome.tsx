@@ -25,7 +25,7 @@ export function Welcome() {
       const account = await api.openAccount(name, cents ?? 0);
       await api.saveSettings({ account_id: account.id });
       for (const symbol of picks) {
-        setStep(`Downloading five years of ${symbol}…`);
+        setStep(`Downloading ${symbol}’s history…`);
         try {
           await api.watch(symbol);
         } catch (e) {
