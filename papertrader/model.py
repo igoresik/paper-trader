@@ -360,6 +360,24 @@ def follow(symbol, since, interval="1d"):
     return {"return": float(growth - 1), "days": len(done)}
 
 
+def follow_oos(symbol, since, until, interval="1d"):
+    """What following the active model's out-of-sample calls made between since and until: long after each
+    BUY, out otherwise. These calls came from models that never trained on the day, so a replay can use them."""
+    chosen = active(symbol, interval)
+    if not chosen:
+        return {"return": 0.0, "days": 0}
+    rows = db.query(
+        "SELECT p.signal, b.close_cents AS close, (SELECT n.close_cents FROM bars n WHERE n.symbol = b.symbol"
+        " AND n.interval = b.interval AND n.ts > b.ts AND n.ts <= ? ORDER BY n.ts LIMIT 1) AS next_close"
+        " FROM predictions p JOIN bars b ON b.symbol = ? AND b.interval = ? AND b.ts = p.ts"
+        " WHERE p.model_id = ? AND p.ts >= ? AND p.ts < ?",
+        (until, symbol, interval, chosen["id"], since, until),
+    )
+    done = [r for r in rows if r["next_close"] is not None]
+    growth = np.prod([r["next_close"] / r["close"] for r in done if r["signal"] == "BUY"])
+    return {"return": float(growth - 1), "days": len(done)}
+
+
 def report(symbol, interval):
     """Everything the signal card shows: the signal, the indicators behind it and the model's record."""
     signal = live_signal(symbol, interval)

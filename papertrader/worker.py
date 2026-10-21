@@ -77,8 +77,8 @@ class Worker:
 
     def symbols(self):
         rows = db.query(
-            "SELECT symbol FROM watchlist UNION SELECT symbol FROM positions"
-            " UNION SELECT symbol FROM orders WHERE status = 'OPEN'"
+            "SELECT symbol FROM watchlist UNION SELECT symbol FROM positions WHERE account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
+            " UNION SELECT symbol FROM orders WHERE status = 'OPEN' AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
         )
         return {row["symbol"] for row in rows} | self.watched | {"SPY"}  # SPY is the benchmark
 
@@ -92,7 +92,8 @@ class Worker:
                     self.submit(self.seed, "1d", [symbol])
 
     def orders_changed(self):
-        self.with_orders = {r["symbol"] for r in db.query("SELECT DISTINCT symbol FROM orders WHERE status = 'OPEN'")}
+        self.with_orders = {r["symbol"] for r in db.query(
+            "SELECT DISTINCT symbol FROM orders WHERE status = 'OPEN' AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)")}
         if self.loop:
             self.loop.call_soon_threadsafe(self._wake.set)
 
@@ -190,7 +191,8 @@ class Worker:
     def _catch_up_bars(self, symbol, minutes):
         """Daily bars for the days before the minute data starts (Yahoo keeps minutes for about a week)."""
         first = minutes[0]["ts"]
-        oldest = db.query("SELECT MIN(created_at) AS t FROM orders WHERE symbol = ? AND status = 'OPEN'", (symbol,))[0]["t"]
+        oldest = db.query("SELECT MIN(created_at) AS t FROM orders WHERE symbol = ? AND status = 'OPEN'"
+                          " AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)", (symbol,))[0]["t"]
         daily = db.query(
             "SELECT ts, open_cents AS open, high_cents AS high, low_cents AS low, close_cents AS close FROM bars"
             " WHERE symbol = ? AND interval = '1d' AND ts >= ? AND ts < ? ORDER BY ts",

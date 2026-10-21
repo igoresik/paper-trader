@@ -8,6 +8,7 @@ import { DeskProvider, useDesk, useSettings } from "./desk";
 import { api } from "./lib/api";
 import { ModelLab } from "./views/ModelLab";
 import { PortfolioView } from "./views/Portfolio";
+import { Replay } from "./views/Replay";
 import { SettingsDialog } from "./views/SettingsDialog";
 import { Trade } from "./views/Trade";
 import { Welcome } from "./views/Welcome";
@@ -27,6 +28,7 @@ function Desk() {
       <main className="min-h-0 flex-1">
         {view === "trade" && <Trade portfolio={portfolio} />}
         {view === "portfolio" && <PortfolioView portfolio={portfolio} />}
+        {view === "replay" && <Replay />}
         {view === "lab" && <ModelLab />}
       </main>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
