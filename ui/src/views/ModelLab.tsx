@@ -355,7 +355,7 @@ export function ModelLab() {
         {run.data ? (
           <Result run={run.data} onActivate={() => activate.mutate(run.data.id)} activating={activate.isPending} />
         ) : runs.isLoading || run.isLoading ? null : (
-          <Empty title={`No tests for ${symbol} yet`}>Run one on the left. It takes a few seconds.</Empty>
+          <Empty title={`No tests for ${symbol} yet`}>Run one on the left. It takes 10 to 30 seconds on daily bars.</Empty>
         )}
         {!!runs.data?.length && (
           <section className="mt-8">

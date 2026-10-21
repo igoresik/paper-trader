@@ -66,7 +66,7 @@ export function SignalCard() {
 
       {isLoading && (
         <p className="mt-3 flex items-center gap-2 text-ink-2">
-          <LoaderCircle className="size-4 animate-spin" /> Training on {symbol}&rsquo;s history. The first time takes a few seconds.
+          <LoaderCircle className="size-4 animate-spin" /> Training on {symbol}&rsquo;s history. The first time takes up to half a minute.
         </p>
       )}
       {error && <p className="mt-3 text-ink-2">{error.message}</p>}
