@@ -71,17 +71,22 @@ export function SignalCard() {
       {error && <p className="mt-3 text-ink-2">{error.message}</p>}
       {s && (
         <div className="mt-2 grid gap-3">
-          <div className="flex items-baseline justify-between">
-            {s.clear ? (
+          {s.clear ? (
+            <div className="flex items-baseline justify-between">
               <span className={cx("text-2xl font-semibold", tone[s.signal])}>{word[s.signal]}</span>
-            ) : (
-              <span className="text-2xl font-semibold text-ink-2">No clear edge</span>
-            )}
-            <span className="text-ink-2">
-              {!s.clear && <>leans {word[s.signal].toLowerCase()}, </>}
-              <span className="num font-medium text-ink">{percent(s.confidence, { digits: 0 })}</span> sure, after {marketDay(s.ts)}
-            </span>
-          </div>
+              <span className="text-ink-2">
+                <span className="num font-medium text-ink">{percent(s.confidence, { digits: 0 })}</span> sure, after {marketDay(s.ts)}
+              </span>
+            </div>
+          ) : (
+            <div>
+              <span className="text-xl font-semibold text-ink-2">No clear edge</span>
+              <p className="text-ink-2">
+                Leans <span className={cx("font-medium", tone[s.signal])}>{word[s.signal].toLowerCase()}</span>,{" "}
+                <span className="num font-medium text-ink">{percent(s.confidence, { digits: 0 })}</span> sure, after {marketDay(s.ts)}
+              </p>
+            </div>
+          )}
           <Probabilities s={s} />
           <p className="text-[12px] leading-snug text-ink-2">
             {s.band
