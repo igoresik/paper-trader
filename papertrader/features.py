@@ -77,6 +77,15 @@ def labels(close, threshold):
     return pd.Series(label, index=close.index, dtype=float).where(change.notna())
 
 
+def move_labels(close, window=60):
+    """1 = the next bar moves more than usual, -1 = less. Usual is the median size of the last window moves, all
+    known by the bar's close, so about half the bars are each. Returns the labels and the usual size."""
+    usual = close.pct_change(fill_method=None).abs().rolling(window).median()
+    ahead = (close.shift(-1) / close - 1).abs()
+    label = pd.Series(np.where(ahead > usual, 1, -1), index=close.index, dtype=float)
+    return label.where(ahead.notna() & usual.notna()), usual
+
+
 def build(symbol, interval, p=Params()):
     """Recompute the feature store rows for one symbol from its stored bars."""
     bars = market.frame(symbol, interval)
