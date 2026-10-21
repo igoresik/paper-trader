@@ -85,6 +85,13 @@ def test_other_sites_cannot_listen_to_live_updates(client):
         assert ws.receive_json()["type"] == "hello"
 
 
+def test_other_sites_cannot_change_anything(client):
+    # a page elsewhere can still fire a plain POST at this computer, even if it can't read the answer
+    refused = client.post("/models/runs/1/activate", headers={"origin": "http://evil.example"})
+    assert refused.status_code == 403
+    assert client.post("/models/runs/1/activate", headers={"origin": "http://127.0.0.1:5173"}).json()["code"] == "model"
+
+
 def test_the_signal_comes_with_its_reasons_and_record(client):
     signal = client.get("/market/AAPL/signal").json()
     assert signal["signal"] in ("BUY", "HOLD", "SELL")

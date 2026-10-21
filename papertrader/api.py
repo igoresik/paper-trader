@@ -194,6 +194,14 @@ def create_app(run_worker=True):
     # another website can point its own domain at 127.0.0.1; only answer requests addressed to this computer
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
+    @app.middleware("http")
+    async def own_pages_only(request, call_next):
+        # any site can fire a plain POST at this computer; browsers always say where it came from
+        origin = request.headers.get("origin")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and origin and urlsplit(origin).hostname not in hosts:
+            return JSONResponse({"detail": "Only Paper Trader's own pages can change things.", "code": "origin"}, 403)
+        return await call_next(request)
+
     async def refused(request, error):
         return JSONResponse({"detail": str(error), "code": error.code}, status_code=error.status)
 
