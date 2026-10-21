@@ -114,6 +114,7 @@ def test_settings_are_checked(client):
     assert client.put("/settings", json={"slippage_bps": -1}).status_code == 422
     assert client.put("/settings", json={"nonsense": 1}).status_code == 422
     assert client.put("/settings", json={"theme": "dark"}).json()["theme"] == "dark"
+    assert client.put("/settings", json={"commission_cents": None}).json()["commission_cents"] == 0
 
 
 def test_chart_lines_up_with_its_bars(client):

@@ -535,7 +535,7 @@ def create_app(run_worker=True):
 
     @app.put("/settings", tags=["app"])
     def put_settings(body: SettingsIn):
-        changes = body.model_dump(exclude_unset=True)
+        changes = body.model_dump(exclude_unset=True, exclude_none=True)  # a null would wipe out the default
         if changes.get("account_id") is not None:
             ledger.account(changes["account_id"])
         return settings.update(changes)
