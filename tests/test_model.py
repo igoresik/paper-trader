@@ -222,3 +222,34 @@ def test_sizing_is_scored_against_holding_its_average_size_all_the_time():
     # more in before up days, less before down days: sizing earns what holding steady can't
     assert bt["sized"]["total_return"] > bt["steady"]["total_return"]
     assert len(bt["curve"]["sized"]) == len(bt["curve"]["steady"]) == 199
+
+
+def test_barrier_calls_on_a_random_walk_show_no_edge(put_bars):
+    put_bars("SPY", *random_walk())
+    metrics = model.validate("SPY", Params(trees=40, max_depth=2, horizon=5))["metrics"]
+    folds = metrics["folds"]
+    for earlier, later in zip(folds, folds[1:]):  # 4 rows left out before each test block, whose labels reach into it
+        assert later["train_rows"] == earlier["train_rows"] + earlier["test_rows"]
+    assert metrics["summary"]["verdict"] != "better than the baselines"
+    # yesterday's label is one already known, not the one 4 days into the future
+    assert metrics["folds"][-1]["baselines"]["yesterday"] < 0.6
+
+
+def test_barrier_live_record_grades_calls_once_their_bars_have_closed(put_bars):
+    steps = [0.01, -0.01] * 15
+    put_bars("SPY", list(100 * np.cumprod(1 + np.array([0, *steps, 0.015, 0.01, -0.01, -0.03, 0.001, 0.001, 0.001, 0.001, 0.001]))))
+    ts = [r["ts"] for r in db.query("SELECT ts FROM bars ORDER BY ts")]
+    with db.tx() as conn:
+        conn.execute("INSERT INTO models (id, symbol, interval, params, metrics) VALUES (1, 'SPY', '1d', '{\"horizon\": 4}', '{}')")
+        conn.execute("INSERT INTO models (id, symbol, interval, params, metrics) VALUES (2, 'SPY', '1d', '{}', '{}')")
+        conn.executemany("INSERT INTO signals VALUES ('SPY', '1d', ?, 10000, ?, 0.5, 0.5, 0.3, 0.2, ?)",
+                         [(ts[30], "BUY", 1), (ts[32], "BUY", 1), (ts[35], "HOLD", 1), (ts[-2], "BUY", 1), (ts[31], "SELL", 2)])
+    # right, wrong, right; the last is still open; the next-day model's call isn't graded as a barrier one
+    assert model.live_record("SPY", "1d", 0.005, horizon=4) == {"n": 3, "right": 2}
+    assert model.live_record("SPY", "1d", 0.005)["n"] == 1
+
+
+def test_overlapping_barrier_calls_count_as_fewer():
+    band = {"n": 60, "right": 45}
+    assert model._clear(band, 0.5)  # 60 separate days, 75% right
+    assert not model._clear(band, 0.5, horizon=4)  # 4-day calls a day apart: about 15 separate stretches

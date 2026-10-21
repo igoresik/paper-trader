@@ -25,7 +25,7 @@ def train(args):
     symbol = market.clean(args.symbol)
     if market.needs_refresh(symbol, args.interval):
         market.refresh(symbol, args.interval)
-    p = replace(model.defaults(args.interval), estimator=args.estimator)
+    p = replace(model.defaults(args.interval), estimator=args.estimator, horizon=args.horizon)
     result = model.validate(symbol, p)
     m = result["metrics"]
     print(f"{symbol} {args.interval}, {p.estimator}, threshold {p.threshold:.1%}, walk-forward over {m['rows']} bars")
@@ -75,6 +75,7 @@ def main():
     cmd.add_argument("symbol")
     cmd.add_argument("--interval", choices=["1d", "1h"], default="1d")
     cmd.add_argument("--estimator", choices=["random_forest", "gradient_boosting"], default="random_forest")
+    cmd.add_argument("--horizon", type=int, default=1, help="bars ahead; above 1, a barrier call")
     cmd.add_argument("--activate", action="store_true", help="use this run for live signals")
     cmd.set_defaults(run=train)
     args = parser.parse_args()

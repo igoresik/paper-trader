@@ -128,6 +128,7 @@ class RunIn(BaseModel):
     min_confidence: Annotated[float, Field(ge=0, lt=1)] = 0.0
     cost_bps: Annotated[float, Field(ge=0, le=500)] = 5.0
     prune: bool = False
+    horizon: Annotated[int, Field(ge=1, le=20)] = 1  # the edge range resamples 20-bar blocks, so no further
     indicators: IndicatorsIn = IndicatorsIn()
 
 
