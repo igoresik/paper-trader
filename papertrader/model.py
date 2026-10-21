@@ -2,7 +2,7 @@
 
 import json
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,7 @@ from . import db, features, market
 CLASSES = [-1, 0, 1]
 NAMES = {-1: "SELL", 0: "HOLD", 1: "BUY"}
 CODES = {name: code for code, name in NAMES.items()}
+MOVE = {-1: "QUIET", 1: "BIG"}  # the move reading: the next bar moves less, or more, than usual
 BANDS = [0.0, 0.4, 0.45, 0.5, 0.55, 0.6, 1.0]  # confidence bands for the track record
 PER_YEAR = {"1d": 252, "1h": 252 * 7}
 MIN_ROWS = 250
@@ -162,8 +163,14 @@ def summarize(folds, oos, tries=1):
     verdict = ("better than the baselines" if low > 0 else "worse than the baselines" if high < 0
                else "not clearly better than the baselines")
     fold_bal = [f["balanced_accuracy"] for f in folds]
-    return {"scores": scores, "edge": edge, "edge_range": [low, high], "tries": tries, "verdict": verdict,
-            "fold_balanced_accuracy": {"mean": float(np.mean(fold_bal)), "std": float(np.std(fold_bal))}}
+    summary = {"scores": scores, "edge": edge, "edge_range": [low, high], "tries": tries, "verdict": verdict,
+               "fold_balanced_accuracy": {"mean": float(np.mean(fold_bal)), "std": float(np.std(fold_bal))}}
+    if (oos["actual"] == 0).any():  # a three-way model: score up against down on its own, where it called one
+        called = oos[(oos["pred"] != 0) & (oos["actual"] != 0)]
+        right = int((called["pred"] == called["actual"]).sum())
+        summary["direction"] = {"n": len(called), "right": right,
+                                "range": list(_wilson(right, len(called))) if len(called) else None}
+    return summary
 
 
 def _performance(returns, equity, per_year):
@@ -198,10 +205,10 @@ def backtest(oos, close, p):
     }
 
 
-def track_record(oos):
+def track_record(oos, names=NAMES):
     """How often each signal was right out of sample, by confidence band."""
     record = []
-    for code, name in NAMES.items():
+    for code, name in names.items():
         mine = oos[oos["pred"] == code]
         for low, high in zip(BANDS, BANDS[1:]):
             band = mine[(mine["conf"] >= low) & ((mine["conf"] < high) | (high == 1.0))]
@@ -216,25 +223,55 @@ def _band(record, signal, confidence):
                  and (confidence < b["to"] or b["to"] == 1.0)), None)
 
 
-def _wilson_low(right, n, z=1.96):
-    """Lower end of the 95% range for a hit rate of right/n, which stays honest for small n."""
-    rate = right / n
-    return (rate + z * z / (2 * n) - z * np.sqrt(rate * (1 - rate) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+def _wilson(right, n, z=1.96):
+    """The 95% range for a hit rate of right/n, which stays honest for small n."""
+    rate, centre = right / n, right / n + z * z / (2 * n)
+    spread = z * np.sqrt(rate * (1 - rate) / n + z * z / (4 * n * n))
+    return float((centre - spread) / (1 + z * z / n)), float((centre + spread) / (1 + z * z / n))
+
+
+def _clear(band, base):
+    """A call counts when, in its confidence band, it was right clearly more often than its outcome happens anyway."""
+    return bool(band and band["n"] >= MIN_CALLS and _wilson(band["right"], band["n"])[0] > base)
 
 
 def call(model_id, signal, confidence):
-    """Whether a signal at this confidence has an edge: in its band, out of sample, it must have been right
-    clearly more often than that outcome happens anyway. A 3-way guess that's 36% sure usually hasn't."""
+    """Whether a signal at this confidence is a call on direction, judged on its band's out-of-sample calls. BUY and
+    SELL have to get the direction right clearly more than half the time on the days that moved: a BUY is also right
+    more often whenever big moves are likely, either way. HOLD never is: how big the move will be is the move
+    reading's job, and two answers to that question could only contradict each other."""
     band = _band(run(model_id)["metrics"].get("track_record", []), signal, confidence)
     base = db.query("SELECT AVG(actual = ?) AS rate FROM predictions WHERE model_id = ?", (signal, model_id))[0]["rate"] or 0.0
-    clear = bool(band and band["n"] >= MIN_CALLS and _wilson_low(band["right"], band["n"]) > base)
-    return {"band": band, "base_rate": base, "clear": clear}
+    if signal == "HOLD" or not band:
+        return {"band": band, "base_rate": base, "moved": None, "clear": False}
+    moved = db.query(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(actual = signal), 0) AS right FROM predictions WHERE model_id = ?"
+        " AND signal = ? AND actual != 'HOLD' AND confidence >= ? AND (confidence < ? OR ? = 1.0)",
+        (model_id, signal, band["from"], band["to"], band["to"]),
+    )[0]
+    return {"band": band, "base_rate": base, "moved": moved, "clear": _clear(moved, 0.5)}
+
+
+def move_call(chosen, p_big):
+    """The move reading for a probability that the next bar moves more than usual, judged like a signal."""
+    m = chosen["metrics"]["move"]
+    call_ = "BIG" if p_big >= 0.5 else "QUIET"
+    confidence = max(p_big, 1 - p_big)
+    band = _band(m["track_record"], call_, confidence)
+    base = m["base_rate"] if call_ == "BIG" else 1 - m["base_rate"]
+    return {"call": call_, "confidence": confidence, "band": band, "base_rate": base, "clear": _clear(band, base)}
 
 
 def validate(symbol, p, progress=None):
     """Run walk-forward validation and store the run (not active yet). Returns the run."""
     bars, X, y = dataset(symbol, p)
-    folds, oos, (last_model, last_X, last_y) = walk_forward(X, y, p, progress)
+
+    def part(start):  # each of the two models fills half the progress bar
+        return (lambda done: progress(start + done / 2)) if progress else None
+
+    folds, oos, (last_model, last_X, last_y) = walk_forward(X, y, p, part(0))
+    big, _ = features.move_labels(bars["close"])
+    move_folds, move_oos, _ = walk_forward(X, big, replace(p, min_confidence=0.0), part(0.5))
     importance = permutation_importance(
         last_model, last_X, last_y, scoring="balanced_accuracy", n_repeats=5, random_state=0
     ).importances_mean
@@ -247,6 +284,8 @@ def validate(symbol, p, progress=None):
         "track_record": track_record(oos),
         "importance": dict(zip(last_X.columns, importance.round(4).tolist())),
         "rows": len(oos), "from": int(oos.index[0]), "to": int(oos.index[-1]),
+        "move": {"summary": summarize(move_folds, move_oos, tries), "track_record": track_record(move_oos, MOVE),
+                 "base_rate": float((move_oos["actual"] == 1).mean())},
     }
     with db.tx() as conn:
         model_id = conn.execute(
@@ -300,7 +339,10 @@ def activate(model_id):
     return run(model_id)
 
 
-_fitted = {}  # (symbol, interval) -> (model id, last bar, estimator); kept in memory only, never pickled
+_fitted = {}  # (symbol, interval) -> (model id, last bar, estimators); kept in memory only, never pickled
+# (symbol, interval) -> the call last worked out. The signals table keeps the first one shown for each bar, for an
+# honest live record; this is what the watchlist shows, so it follows a retested or newly chosen model
+latest = {}
 _fit_lock = threading.Lock()
 
 
@@ -308,16 +350,22 @@ def live_signal(symbol, interval):
     """Signal for the bar after the latest complete one. Trains and activates a default model the first time."""
     chosen = active(symbol, interval) or activate(validate(symbol, defaults(interval))["id"])
     p = Params.load(chosen["params"])
+    if "move" not in chosen["metrics"]:  # tested before move readings existed: once more, with the same settings
+        chosen = activate(validate(symbol, p)["id"])
     bars, X, y = dataset(symbol, p)
+    big, usual = features.move_labels(bars["close"])
     if X.iloc[-1].isna().any():
         raise ModelError("The latest bar doesn't have enough history for its indicators yet.")
     with _fit_lock:
         cached = _fitted.get((symbol, interval))
         if not cached or cached[:2] != (chosen["id"], bars.index[-1]):
             known = X.notna().all(axis=1) & y.notna()
-            cached = (chosen["id"], bars.index[-1], _estimator(p).fit(X[known], y[known].astype(int)))
+            moved = X.notna().all(axis=1) & big.notna()
+            cached = (chosen["id"], bars.index[-1], _estimator(p).fit(X[known], y[known].astype(int)),
+                      _estimator(p).fit(X[moved], big[moved].astype(int)))
             _fitted[(symbol, interval)] = cached
     proba = _proba(cached[2], X.iloc[[-1]])
+    p_big = float(_proba(cached[3], X.iloc[[-1]])[0, 2])
     pred, conf = _decide(proba, p.min_confidence)
     signal = {
         "symbol": symbol, "interval": interval, "ts": int(bars.index[-1]),
@@ -325,6 +373,7 @@ def live_signal(symbol, interval):
         "confidence": float(conf[0]), "p_sell": float(proba[0, 0]), "p_hold": float(proba[0, 1]),
         "p_buy": float(proba[0, 2]), "model_id": chosen["id"],
         "indicators": {name: float(X[name].iloc[-1]) for name in features.COLUMNS},
+        "move": {"p_big": p_big, "usual": float(usual.iloc[-1]), **move_call(chosen, p_big)},
     }
     with db.tx() as conn:
         conn.execute(
@@ -332,7 +381,25 @@ def live_signal(symbol, interval):
             " :p_buy, :p_hold, :p_sell, :model_id)",
             signal,
         )
+        conn.execute("INSERT OR IGNORE INTO move_signals VALUES (?, ?, ?, ?, ?, ?)",
+                     (symbol, interval, signal["ts"], signal["move"]["usual"], p_big, chosen["id"]))
+    latest[(symbol, interval)] = {k: signal[k] for k in ("symbol", "signal", "confidence", "ts", "model_id")} | {
+        "clear": call(chosen["id"], signal["signal"], signal["confidence"])["clear"]}
     return signal
+
+
+def move_record(symbol, interval):
+    """How the live move readings turned out, once the next bar closed."""
+    rows = db.query(
+        "SELECT m.ts, m.usual, m.p_big, s.close_cents, (SELECT b.close_cents FROM bars b WHERE b.symbol = m.symbol"
+        " AND b.interval = m.interval AND b.ts > m.ts ORDER BY b.ts LIMIT 1) AS next_close"
+        " FROM move_signals m JOIN signals s USING (symbol, interval, ts) WHERE m.symbol = ? AND m.interval = ?",
+        (symbol, interval),
+    )
+    done, factor = [r for r in rows if r["next_close"] is not None], market.split_factor(symbol)
+    right = sum((r["p_big"] >= 0.5) == (abs(r["next_close"] * factor(r["ts"]) / r["close_cents"] - 1) > r["usual"])
+                for r in done)
+    return {"n": len(done), "right": right}
 
 
 def live_record(symbol, interval, threshold):
@@ -396,4 +463,5 @@ def report(symbol, interval):
                   "threshold": chosen["params"]["threshold"], "summary": m["summary"]},
         **call(chosen["id"], signal["signal"], signal["confidence"]),
         "live_record": live_record(symbol, interval, chosen["params"]["threshold"]),
+        "move": {**signal["move"], "summary": m["move"]["summary"], "live_record": move_record(symbol, interval)},
     }

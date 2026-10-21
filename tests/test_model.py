@@ -144,6 +144,13 @@ def test_a_call_counts_only_when_it_beats_how_often_that_happens_anyway():
     predictions(3, [("SELL", 0.6, "SELL")] * 10 + [("HOLD", 0.5, "HOLD")] * 90)
     assert not model.call(3, "SELL", 0.6)["clear"]  # 10 of 10, but 10 calls prove little
     assert not model.call(3, "BUY", 0.6)["clear"]  # never made out of sample
+    # right 40% when buy days are 30%, but only because big days come together: of the days that moved, 40 went up
+    # and 35 down, which is no call on direction
+    predictions(4, [("BUY", 0.4, "BUY")] * 40 + [("BUY", 0.4, "SELL")] * 35 + [("BUY", 0.4, "HOLD")] * 25
+                + [("HOLD", 0.5, "HOLD")] * 100 + [("HOLD", 0.5, "SELL")] * 25 + [("HOLD", 0.5, "BUY")] * 20)
+    choppy = model.call(4, "BUY", 0.4)
+    assert choppy["moved"] == {"n": 75, "right": 40} and not choppy["clear"]
+    assert not model.call(4, "HOLD", 0.5)["clear"]  # flat or not is the move reading's question
 
 
 def test_following_the_live_signals_buys_only_on_buy_days(put_bars):
@@ -154,3 +161,29 @@ def test_following_the_live_signals_buys_only_on_buy_days(put_bars):
                          [(1_600_000_000, 10_000, "BUY"), (1_600_086_400, 10_100, "BUY"), (1_600_172_800, 9_898, "SELL")])
     followed = model.follow("SPY", since=1_600_000_000)
     assert followed["days"] == 3 and round(followed["return"], 4) == round(1.01 * 0.98 - 1, 4)
+
+
+def test_the_move_reading_finds_planted_big_moves_and_direction_is_scored_on_its_own(put_bars):
+    put_bars("SPY", *planted())  # every volume spike comes before a 2% jump
+    m = model.validate("SPY", FAST)["metrics"]
+    assert m["move"]["summary"]["verdict"] == "better than the baselines"
+    assert 0.1 < m["move"]["base_rate"] < 0.9
+    called = m["summary"]["direction"]
+    assert called["n"] > 0 and called["range"][0] <= called["right"] / called["n"] <= called["range"][1]
+
+
+def test_a_random_walk_has_no_move_edge_either(put_bars):
+    put_bars("SPY", *random_walk())
+    assert model.validate("SPY", FAST)["metrics"]["move"]["summary"]["verdict"] != "better than the baselines"
+
+
+def test_a_run_from_before_move_readings_is_retested_with_its_own_settings(put_bars):
+    put_bars("SPY", *random_walk())
+    old = model.validate("SPY", FAST)
+    with db.tx() as conn:  # as stored by 1.1
+        conn.execute("UPDATE models SET metrics = json_remove(metrics, '$.move') WHERE id = ?", (old["id"],))
+    model.activate(old["id"])
+    signal = model.live_signal("SPY", "1d")
+    assert signal["model_id"] != old["id"] and model.run(signal["model_id"])["params"] == old["params"]
+    assert 0 <= signal["move"]["p_big"] <= 1 and signal["move"]["call"] in ("BIG", "QUIET")
+    assert model.move_record("SPY", "1d") == {"n": 0, "right": 0}  # graded once the next bar closes
