@@ -19,6 +19,7 @@ class Params:
     bb_k: float = 2.0
     vol: int = 20
     context: bool = False  # momentum plus the VIX and the yield; runs from before it existed load without it
+    regime: bool = False  # recent volatility against the longer run, and moves measured in it; same for older runs
 
 
 def wilder(x, n):
@@ -52,7 +53,9 @@ def macd(close, fast, slow, signal):
 
 def indicators(close, volume, p=Params(), context=None):
     """Feature table for these closes and volumes (float Series on one index). With p.context it adds 5- and 20-bar
-    momentum, and the market context columns when context (lined up with the bars, see market.context) is given."""
+    momentum, and the market context columns when context (lined up with the bars, see market.context) is given.
+    With p.regime it adds the last 5 bars' volatility against the last 60's, and the latest 1- and 5-bar moves in
+    units of volatility."""
     mid, band = bollinger(close, p.bb, p.bb_k)
     # rolling, not whole-history, mean and std: those would leak later volume into earlier rows
     vol_z = (volume - volume.rolling(p.vol).mean()) / volume.rolling(p.vol).std(ddof=0)
@@ -67,6 +70,11 @@ def indicators(close, volume, p=Params(), context=None):
         table = table.assign(ret_5=close.pct_change(5, fill_method=None), ret_20=close.pct_change(20, fill_method=None))
         if context is not None:
             table = table.join(context)
+    if p.regime:
+        step = close.pct_change(fill_method=None)
+        usual = step.rolling(60).std()  # moves in units of usual volatility read the same in calm and wild years
+        table = table.assign(vol_ratio=step.rolling(5).std() / usual, ret_z=step / step.rolling(20).std(),
+                             ret_5_z=close.pct_change(5, fill_method=None) / (usual * np.sqrt(5)))
     return table.replace([np.inf, -np.inf], np.nan)
 
 

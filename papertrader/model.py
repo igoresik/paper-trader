@@ -51,7 +51,7 @@ class Params:
 
 def defaults(interval):
     return Params(interval=interval, threshold=0.005 if interval == "1d" else 0.002,
-                  indicators=features.Params(context=True))
+                  indicators=features.Params(context=True, regime=True))
 
 
 def _estimator(p):
