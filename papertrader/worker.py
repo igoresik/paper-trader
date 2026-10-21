@@ -107,17 +107,24 @@ class Worker:
     async def _housekeeping(self):
         if settings.get()["check_updates"]:
             self.update = await self._run(updates.newer)
+        await self._run(self.update_context)
         for symbol in sorted(self.symbols()):
             await self._run(self.update_history, symbol)
         await self._run(self.seed, "5d")
         last = None
         while True:
+            await self._run(self.update_context)
             for symbol in sorted(self.symbols()):
                 await self._run(self.update_history, symbol)
             if (now := self.status()) != last:
                 self.publish({"type": "status", **now})
                 last = now
             await asyncio.sleep(60)
+
+    def update_context(self):
+        """The VIX and the 10-year yield, which the models read alongside each symbol's own bars."""
+        if market.needs_refresh(market.CONTEXT[0], "1d"):
+            market.refresh_context()
 
     def update_history(self, symbol):
         """Refresh stale history and make sure the latest complete bar has its signal."""
