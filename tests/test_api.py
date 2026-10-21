@@ -102,6 +102,9 @@ def test_the_signal_comes_with_its_reasons_and_record(client):
     assert set(signal["indicators"]) == {"rsi", "ema_spread", "vol_z", "pct_b", "bb_width"}
     assert signal["model"]["summary"]["verdict"]
     assert signal["live_record"] == {"n": 0, "right": 0}
+    assert isinstance(signal["clear"], bool) and 0 <= signal["base_rate"] <= 1
+    listed = client.post("/watchlist", json={"symbol": "AAPL"}).json()
+    assert listed["signal"]["clear"] == signal["clear"]
 
 
 def test_limit_orders_wait_and_can_be_cancelled_once(client):

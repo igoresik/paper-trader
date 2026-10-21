@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -108,3 +110,26 @@ def test_live_record_compares_closes_across_a_split(put_bars):
         conn.execute("INSERT INTO signals VALUES ('SPY', '1d', 1600000000, 10000, 'BUY', 0.5, 0.5, 0.3, 0.2, 1)")
         conn.execute("INSERT INTO splits (symbol, ts, ratio) VALUES ('SPY', 1600086400, 2.0)")
     assert model.live_record("SPY", "1d", 0.005) == {"n": 1, "right": 1}  # +1%, not -49.5%
+
+
+def predictions(model_id, rows):
+    """rows: (signal, confidence, actual) out-of-sample calls for one stored run."""
+    with db.tx() as conn:
+        conn.execute("INSERT INTO models (id, symbol, interval, params, metrics) VALUES (?, 'SPY', '1d', '{}', ?)",
+                     (model_id, json.dumps({"track_record": model.track_record(pd.DataFrame(
+                         [{"pred": model.CODES[s], "conf": c, "actual": model.CODES[a]} for s, c, a in rows]))})))
+        conn.executemany("INSERT INTO predictions VALUES (?, ?, ?, ?, ?)",
+                         [(model_id, i, s, c, a) for i, (s, c, a) in enumerate(rows)])
+
+
+def test_a_call_counts_only_when_it_beats_how_often_that_happens_anyway():
+    # sell days are 30% of all days; at 36% sure, sell calls were right 22% of the time
+    predictions(1, [("SELL", 0.36, "SELL")] * 22 + [("SELL", 0.36, "BUY")] * 78 + [("BUY", 0.5, "SELL")] * 38
+                + [("BUY", 0.5, "BUY")] * 62)
+    weak = model.call(1, "SELL", 0.36)
+    assert (weak["clear"], weak["band"]["n"], round(weak["base_rate"], 2)) == (False, 100, 0.3)
+    predictions(2, [("SELL", 0.6, "SELL")] * 60 + [("SELL", 0.6, "HOLD")] * 40 + [("HOLD", 0.5, "HOLD")] * 300)
+    assert model.call(2, "SELL", 0.6)["clear"]  # right 60% when sell days are 15%
+    predictions(3, [("SELL", 0.6, "SELL")] * 10 + [("HOLD", 0.5, "HOLD")] * 90)
+    assert not model.call(3, "SELL", 0.6)["clear"]  # 10 of 10, but 10 calls prove little
+    assert not model.call(3, "BUY", 0.6)["clear"]  # never made out of sample
