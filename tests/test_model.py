@@ -39,6 +39,17 @@ def test_a_random_walk_shows_no_edge(put_bars):
     summary = model.validate("SPY", FAST)["metrics"]["summary"]
     assert summary["verdict"] != "better than the baselines"
     assert summary["scores"]["model"]["balanced_accuracy"] < 0.45  # leakage would push this far up
+    low, high = summary["edge_range"]
+    assert low < summary["edge"] < high and low < 0  # luck can't be ruled out
+
+
+def test_each_run_on_the_same_data_widens_the_range(put_bars):
+    put_bars("SPY", *random_walk())
+    first = model.validate("SPY", FAST)["metrics"]["summary"]
+    second = model.validate("SPY", FAST)["metrics"]["summary"]
+    assert (first["tries"], second["tries"]) == (1, 2)
+    assert second["edge"] == first["edge"]  # same data, same settings
+    assert second["edge_range"][0] < first["edge_range"][0] and second["edge_range"][1] > first["edge_range"][1]
 
 
 def test_a_planted_pattern_is_found(put_bars):

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { money, parseCents, percent } from "./format";
+import { edgeRange, money, parseCents, percent } from "./format";
 
 describe("money", () => {
   it("writes whole cents as dollars without floating point", () => {
@@ -25,5 +25,13 @@ describe("parseCents", () => {
     expect(parseCents("10")).toBe(1_000);
     expect(parseCents("10.123")).toBeNull();
     expect(parseCents("abc")).toBeNull();
+  });
+});
+
+describe("edgeRange", () => {
+  it("reads as a sentence and counts the runs tried", () => {
+    expect(edgeRange([-0.033, 0.054], 1)).toBe("likely between −3.3 and +5.4 points");
+    expect(edgeRange([-0.04, 0.06], 3)).toBe("likely between −4.0 and +6.0 points, allowing for 3 runs on this data");
+    expect(edgeRange(undefined)).toBe("");
   });
 });

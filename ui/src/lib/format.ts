@@ -23,6 +23,18 @@ export function percent(fraction: number | null | undefined, { sign = false, dig
   return sign && fraction > 0 ? `+${text}` : text;
 }
 
+/** A balanced-accuracy gap as signed points: +2.8 */
+export function points(x: number): string {
+  return `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(1)}`;
+}
+
+/** "likely between -3.3 and +5.4 points" for a stored edge range, or "" for runs that don't have one */
+export function edgeRange(range?: [number, number], tries?: number): string {
+  if (!range) return "";
+  const runs = tries && tries > 1 ? `, allowing for ${tries} runs on this data` : "";
+  return `likely between ${points(range[0])} and ${points(range[1])} points${runs}`;
+}
+
 export function shares(n: number): string {
   return grouped.format(n);
 }

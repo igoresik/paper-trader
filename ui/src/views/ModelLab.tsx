@@ -7,7 +7,7 @@ import { LineChart } from "../components/LineChart";
 import { Button, cx, Empty, NumberInput, Segmented, Select } from "../components/ui";
 import { useDesk } from "../desk";
 import { api, type Band, type Run, type RunParams } from "../lib/api";
-import { dateTime, marketDay, percent } from "../lib/format";
+import { dateTime, edgeRange, marketDay, percent, points } from "../lib/format";
 import { onJob } from "../lib/live";
 
 const DEFAULTS: RunParams = {
@@ -204,7 +204,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
 
       <div className="grid gap-2 text-[14px] leading-snug">
         <p>
-          <b className="font-semibold">Direction calls:</b> {m.summary.verdict}. Balanced accuracy {pct(s.model.balanced_accuracy)} against {pct(best)} for the best simple rule ({m.summary.edge >= 0 ? "+" : ""}{(m.summary.edge * 100).toFixed(1)} points), and {pct(m.summary.fold_balanced_accuracy.mean)} &plusmn; {pct(m.summary.fold_balanced_accuracy.std)} across the folds.
+          <b className="font-semibold">Direction calls:</b> {m.summary.verdict}. Balanced accuracy {pct(s.model.balanced_accuracy)} against {pct(best)} for the best simple rule ({points(m.summary.edge)} points{m.summary.edge_range ? `, ${edgeRange(m.summary.edge_range, m.summary.tries)}` : ""}), and {pct(m.summary.fold_balanced_accuracy.mean)} &plusmn; {pct(m.summary.fold_balanced_accuracy.std)} across the folds.
         </p>
         <p>
           <b className="font-semibold">As a strategy:</b> buying on its calls returned {percent(bt.strategy.total_return, { sign: true, digits: 1 })} against {percent(bt.buy_hold.total_return, { sign: true, digits: 1 })} for buy and hold over the same days, after {run.params.cost_bps} bps per trade.
@@ -373,7 +373,7 @@ export function ModelLab() {
                     <td className="text-left">{r.params.estimator === "random_forest" ? `Forest, ${r.params.trees} trees, depth ${r.params.max_depth}` : `Boosting, ${r.params.trees} rounds`}</td>
                     <td>{pct(r.params.threshold, 2)}</td>
                     <td>{pct(r.metrics.summary.scores.model.balanced_accuracy)}</td>
-                    <td>{(r.metrics.summary.edge * 100).toFixed(1)}</td>
+                    <td>{points(r.metrics.summary.edge)}</td>
                     <td>{percent(r.metrics.backtest.strategy.total_return, { sign: true, digits: 1 })}</td>
                     <td>{percent(r.metrics.backtest.buy_hold.total_return, { sign: true, digits: 1 })}</td>
                     <td className="text-buy">{r.active ? "live" : ""}</td>

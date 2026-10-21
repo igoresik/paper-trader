@@ -101,6 +101,10 @@ export interface Scores {
 export interface Summary {
   scores: { model: Scores; majority: Scores; always_buy: Scores; yesterday: Scores };
   edge: number;
+  /** likely range for the edge; runs from before 1.1 don't have it */
+  edge_range?: [number, number];
+  /** runs on this symbol and bar size so far, this one included */
+  tries?: number;
   verdict: string;
   fold_balanced_accuracy: { mean: number; std: number };
 }

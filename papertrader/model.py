@@ -19,8 +19,6 @@ CODES = {name: code for code, name in NAMES.items()}
 BANDS = [0.0, 0.4, 0.45, 0.5, 0.55, 0.6, 1.0]  # confidence bands for the track record
 PER_YEAR = {"1d": 252, "1h": 252 * 7}
 MIN_ROWS = 250
-# balanced-accuracy margins over the best baseline: within NOISE is no edge, past CLEAR is a real one
-NOISE, CLEAR = 0.02, 0.05
 MIN_CALLS = 30  # fewer out-of-sample calls than this in a band prove too little either way
 
 
@@ -122,21 +120,42 @@ def walk_forward(X, y, p, progress=None):
     return folds, pd.concat(parts), (model, Xk.iloc[test], yk.iloc[test])
 
 
-def summarize(folds, oos):
+def _balanced(actual, pred):
+    """Balanced accuracy of each row of (resamples x days) arrays: the mean recall over the classes present."""
+    recalls = []
+    for c in CLASSES:
+        mask = actual == c
+        n = mask.sum(axis=1)
+        recalls.append(np.where(n > 0, (mask & (pred == c)).sum(axis=1) / np.maximum(n, 1), np.nan))
+    return np.nanmean(recalls, axis=0)
+
+
+def edge_range(oos, tries=1, resamples=2_000, block=20, seed=0):
+    """Likely range for the edge over the best baseline, from resampling the out-of-sample days in blocks
+    (neighbouring days move together, so single days would overstate the evidence). Each run tried on the
+    same data is another chance to look good by luck, so the range widens with the number of tries."""
+    n = len(oos)
+    starts = np.random.default_rng(seed).integers(0, max(n - block, 0) + 1, (resamples, -(-n // block)))
+    days = np.minimum((starts[:, :, None] + np.arange(block)).reshape(resamples, -1)[:, :n], n - 1)
+    actual = oos["actual"].to_numpy()[days]
+    best = np.max([_balanced(actual, oos[name].to_numpy()[days]) for name in ("majority", "always_buy", "yesterday")],
+                  axis=0)
+    alpha = 0.05 / tries
+    low, high = np.quantile(_balanced(actual, oos["pred"].to_numpy()[days]) - best, [alpha / 2, 1 - alpha / 2])
+    return float(low), float(high)
+
+
+def summarize(folds, oos, tries=1):
     scores = {name: _scores(oos["actual"], oos[col]) for name, col in
               (("model", "pred"), ("majority", "majority"), ("always_buy", "always_buy"), ("yesterday", "yesterday"))}
     best = max(scores[name]["balanced_accuracy"] for name in ("majority", "always_buy", "yesterday"))
     edge = scores["model"]["balanced_accuracy"] - best
-    if edge > CLEAR:
-        verdict = "better than the baselines"
-    elif edge > NOISE:
-        verdict = "slightly better than the baselines"
-    elif edge >= -NOISE:
-        verdict = "no better than the baselines"
-    else:
-        verdict = "worse than the baselines"
+    low, high = edge_range(oos, tries)
+    # the range decides, not the edge on its own: a few points either way is what luck alone produces
+    verdict = ("better than the baselines" if low > 0 else "worse than the baselines" if high < 0
+               else "not clearly better than the baselines")
     fold_bal = [f["balanced_accuracy"] for f in folds]
-    return {"scores": scores, "edge": edge, "verdict": verdict,
+    return {"scores": scores, "edge": edge, "edge_range": [low, high], "tries": tries, "verdict": verdict,
             "fold_balanced_accuracy": {"mean": float(np.mean(fold_bal)), "std": float(np.std(fold_bal))}}
 
 
@@ -212,8 +231,9 @@ def validate(symbol, p, progress=None):
     importance = permutation_importance(
         last_model, last_X, last_y, scoring="balanced_accuracy", n_repeats=5, random_state=0
     ).importances_mean
+    tries = db.query("SELECT COUNT(*) AS n FROM models WHERE symbol = ? AND interval = ?", (symbol, p.interval))[0]["n"] + 1
     metrics = {
-        "summary": summarize(folds, oos),
+        "summary": summarize(folds, oos, tries),
         "folds": folds,
         "confusion": confusion_matrix(oos["actual"], oos["pred"], labels=CLASSES).tolist(),  # rows: actual SELL, HOLD, BUY
         "backtest": backtest(oos, bars["close"], p),
