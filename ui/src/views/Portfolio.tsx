@@ -20,6 +20,68 @@ function Figure({ label, children, big }: { label: string; children: React.React
   );
 }
 
+/** A signed figure in up/down colour, with proportional digits since it stands alone */
+function Signed({ value, children }: { value: number | null | undefined; children: React.ReactNode }) {
+  const v = value ?? 0;
+  return <span className={cx("whitespace-nowrap", v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink-2")}>{v > 0 ? "▲ " : v < 0 ? "▼ " : ""}{children}</span>;
+}
+
+function Tile({ label, children, note }: { label: string; children: React.ReactNode; note?: React.ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-rule p-3">
+      <div className="text-[12px] text-ink-2">{label}</div>
+      <div className="mt-1 text-[18px] font-semibold leading-tight">{children}</div>
+      {note && <div className="mt-1 text-[11px] leading-snug text-ink-3">{note}</div>}
+    </div>
+  );
+}
+
+function Report({ accountId }: { accountId: number }) {
+  const { data: r } = useQuery({ queryKey: ["equity", "report", accountId], queryFn: () => api.report(accountId) });
+  if (!r) return null;
+  const costs = r.commission_cents + r.slippage_cents;
+  return (
+    <section aria-labelledby="report-title">
+      <h2 id="report-title" className="mb-2 text-[13px] font-semibold">
+        Report card <span className="font-normal text-ink-2">the same honest test the model gets, applied to you</span>
+      </h2>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+        <Tile label="Sales that made money" note={r.sells ? `${r.wins} of ${r.sells} sales` : "Shows up after your first sale"}>
+          {r.sells ? percent(r.wins / r.sells, { digits: 0 }) : "–"}
+        </Tile>
+        <Tile label="Average win and loss" note="per sale, after costs">
+          {r.avg_win_cents == null && r.avg_loss_cents == null ? "–" : (
+            <>
+              <Signed value={r.avg_win_cents}>{r.avg_win_cents == null ? "–" : money(r.avg_win_cents, { sign: true })}</Signed>
+              <span className="text-ink-3"> / </span>
+              <Signed value={r.avg_loss_cents}>{r.avg_loss_cents == null ? "–" : money(r.avg_loss_cents, { sign: true })}</Signed>
+            </>
+          )}
+        </Tile>
+        <Tile label="Biggest drop" note="from a high close to a later low one">
+          {r.max_drawdown == null ? "–" : <Signed value={r.max_drawdown}>{percent(r.max_drawdown, { digits: 1 })}</Signed>}
+        </Tile>
+        <Tile label="Costs paid" note={`${money(r.commission_cents)} commission, ${money(r.slippage_cents)} slippage`}>
+          {money(costs)}
+        </Tile>
+        <Tile label="In the market" note="share of days you held shares at the close">
+          {r.time_in_market == null ? "–" : percent(r.time_in_market, { digits: 0 })}
+        </Tile>
+        <Tile label="Following SPY's model" note={r.model.days ? `long on its buy calls, ${r.model.days} days with a call` : "No live calls on SPY yet"}>
+          {r.model.days ? <Signed value={r.model.return}>{percent(r.model.return, { sign: true, digits: 1 })}</Signed> : "–"}
+        </Tile>
+      </div>
+      <p className="mt-2 text-[12px] text-ink-2">
+        {r.since == null || r.return == null ? "The comparison with SPY and the model starts after your first close." : <>
+        Since {marketDay(r.since)}: you <Signed value={r.return}>{percent(r.return, { sign: true, digits: 1 })}</Signed>, SPY{" "}
+        {r.spy_return == null ? "–" : <Signed value={r.spy_return}>{percent(r.spy_return, { sign: true, digits: 1 })}</Signed>}
+        {r.model.days ? <>, following SPY&rsquo;s model <Signed value={r.model.return}>{percent(r.model.return, { sign: true, digits: 1 })}</Signed></> : null}.
+        </>}
+      </p>
+    </section>
+  );
+}
+
 function Equity({ accountId }: { accountId: number }) {
   const { theme } = useDesk();
   const [range, setRange] = useState("all");
@@ -160,6 +222,7 @@ export function PortfolioView({ portfolio }: { portfolio: Portfolio | undefined 
           <Figure label="Realized"><Change cents={portfolio.realized_pnl_cents}>{money(portfolio.realized_pnl_cents, { sign: true })}</Change></Figure>
         </div>
         <Equity accountId={accountId} />
+        <Report accountId={accountId} />
         <section aria-labelledby="positions-title">
           <h2 id="positions-title" className="mb-2 text-[13px] font-semibold">Positions</h2>
           <PositionsTable portfolio={portfolio} wide />
