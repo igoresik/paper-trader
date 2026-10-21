@@ -66,10 +66,17 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
   const raw = useRef<Candle[]>([]);
   const dataRef = useRef<ChartData | null>(null);
   const fitted = useRef("");
+  const view = useRef<{ from: number; to: number } | null>(null); // the zoom kept across rebuilds
   const [hovered, setHovered] = useState<number | null>(null);
   const [, redraw] = useState(0);
   const quote = useQuote(data.symbol);
-  const structure = JSON.stringify([data.symbol, data.interval, prefs, theme, updown]);
+  // what needs new series; periods and markers are drawn into the existing ones
+  const structure = JSON.stringify([
+    data.symbol, data.interval, prefs.type, prefs.scale, prefs.volume, prefs.calls, prefs.ma1.on, prefs.ma2.on,
+    prefs.bb.on, prefs.rsi.on, prefs.macd.on, theme, updown,
+  ]);
+  const zoom = `${data.symbol}|${data.interval}|${prefs.range}`;
+  const marked = JSON.stringify([prefs.fills, prefs.avgCost, prefs.orders]);
 
   // build the chart for this layout; data updates below keep the zoom
   useEffect(() => {
@@ -168,6 +175,7 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
       setHovered(i < 0 ? null : i);
     });
     return () => {
+      view.current = chart.timeScale().getVisibleLogicalRange();
       chart.remove();
       built.current = null;
     };
@@ -243,12 +251,15 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
             title: `${order.type === "LIMIT" ? "Limit" : "Stop"} ${order.side === "BUY" ? "buy" : "sell"} ${order.shares}`,
           }),
         );
-    if (fitted.current !== structure) {
+    if (fitted.current !== zoom) {
       b.chart.timeScale().fitContent();
-      fitted.current = structure;
+      fitted.current = zoom;
+    } else if (view.current) {
+      b.chart.timeScale().setVisibleLogicalRange(view.current); // a rebuilt chart keeps where you were looking
+      view.current = null;
     }
     redraw((n) => n + 1);
-  }, [data, prefs, structure]);
+  }, [data, structure, marked, zoom]);
 
   // the bar still forming follows the live price; on minute charts a new bar starts each minute
   useEffect(() => {

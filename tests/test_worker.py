@@ -1,3 +1,7 @@
+import threading
+import time
+
+from papertrader import db, ledger, market
 from papertrader.worker import Worker
 
 OPEN = 1_792_416_600  # Monday 2026-10-19, 09:30 New York
@@ -31,3 +35,68 @@ def test_ticks_add_the_volume_traded_since_the_last_one():
         worker._tick({"id": "SPY", "price": 770.0, "time": str((OPEN + second) * 1000), "market_hours": 1, "day_volume": str(total)})
     minutes = worker.minutes["SPY"]
     assert (minutes[OPEN][4], minutes[OPEN + 60][4]) == (250, 50)  # the first tick only sets the starting total
+
+
+def tick(worker, price, second=0):
+    worker._tick({"id": "AAPL", "price": price, "time": str((OPEN + second) * 1000), "market_hours": 1})
+
+
+def test_fills_dont_wait_behind_slow_background_work():
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.place_order(acc, "AAPL", "BUY", "LIMIT", 1, limit_cents=10_000, now=OPEN - 60)
+    worker = Worker(lambda event: None)
+    worker.orders_changed()
+    busy = threading.Event()
+    for _ in range(2):
+        worker.pool.submit(busy.wait, 10)  # history refresh or model training holding both threads
+    try:
+        tick(worker, 99.0)
+        assert wait_for(lambda: ledger.orders(acc, "FILLED"))
+    finally:
+        busy.set()
+
+
+def test_ticks_that_arrive_mid_match_are_matched_together_next():
+    worker, runs, release = Worker(lambda event: None), [], threading.Event()
+    worker.with_orders = {"AAPL"}
+
+    def match(symbol, ticks):
+        runs.append(len(ticks))
+        release.wait(10)
+
+    worker.match = match
+    tick(worker, 150.0)
+    assert wait_for(lambda: runs == [1])
+    for second in (1, 2, 3):
+        tick(worker, 150.0, second)
+    release.set()
+    assert wait_for(lambda: runs == [1, 3])
+
+
+def test_a_split_reaches_open_orders_before_ticks_at_the_new_price(monkeypatch):
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.execute_market(acc, "AAPL", "BUY", 10, 9_500, now=OPEN - 86_400)
+    ledger.place_order(acc, "AAPL", "SELL", "STOP", 10, stop_cents=9_000, now=OPEN - 86_400)
+
+    def yahoo_marks_a_split(symbol):
+        with db.tx() as conn:
+            conn.execute("INSERT OR IGNORE INTO splits (symbol, ts, ratio) VALUES (?, ?, 10.0)", (symbol, market.day_start(OPEN)))
+
+    monkeypatch.setattr(market, "check_splits", yahoo_marks_a_split)
+    monkeypatch.setattr(market, "session", lambda now=None: "regular")
+    worker = Worker(lambda event: None)
+    worker.orders_changed()
+    tick(worker, 9.60)  # $96 before the split: above the $90 stop
+    worker.matcher.submit(lambda: None).result()
+    stop = ledger.orders(acc)  # still open, now on the new share count
+    assert [(o["shares"], o["stop_cents"]) for o in stop] == [(100, 900)]
+    assert ledger.positions(acc)[0]["shares"] == 100
+
+
+def wait_for(check, seconds=5):
+    end = time.time() + seconds
+    while time.time() < end:
+        if check():
+            return True
+        time.sleep(0.02)
+    return False

@@ -5,18 +5,10 @@ import { toast } from "sonner";
 
 import { useDesk } from "../desk";
 import { api, type WatchItem } from "../lib/api";
+import { useDebounced } from "../lib/debounce";
 import { arrow, percent, price } from "../lib/format";
 import { useQuote, watch } from "../lib/live";
 import { cx, Tip } from "./ui";
-
-function useDebounced<T>(value: T, ms: number) {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setSettled(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return settled;
-}
 
 function SymbolSearch({ onPick, busy }: { onPick: (symbol: string) => void; busy: boolean }) {
   const [text, setText] = useState("");
@@ -70,7 +62,8 @@ function SymbolSearch({ onPick, busy }: { onPick: (symbol: string) => void; busy
           if (e.key === "ArrowDown") setCursor((c) => Math.min(c + 1, found.length - 1));
           else if (e.key === "ArrowUp") setCursor((c) => Math.max(c - 1, 0));
           else if (e.key === "Escape") (setText(""), setOpen(false));
-          else if (e.key === "Enter" && text.trim()) pick(found[cursor]?.symbol ?? text.trim());
+          // results still showing an earlier prefix don't count: Enter then takes what was typed
+          else if (e.key === "Enter" && text.trim()) pick((query === text.trim() && found[cursor]?.symbol) || text.trim());
           else return;
           e.preventDefault();
         }}

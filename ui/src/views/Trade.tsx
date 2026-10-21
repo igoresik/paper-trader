@@ -18,8 +18,10 @@ function ChartPanel() {
   const { symbol, chart, save, accountId, theme, settings } = useDesk();
   const client = useQueryClient();
   const quote = useQuote(symbol);
+  // only what the server computes keys the fetch; chart type, scale and markers are drawn without one
+  const { interval, range, ma1, ma2, bb, rsi, macd } = chart;
   const { data, error, isFetching, isPlaceholderData } = useQuery({
-    queryKey: ["chart", symbol, chart, accountId],
+    queryKey: ["chart", symbol, { interval, range, ma1, ma2, bb, rsi, macd }, accountId],
     queryFn: () => api.chart(symbol, chart, accountId),
     placeholderData: (previous) => previous,
     staleTime: 60_000,
@@ -37,10 +39,10 @@ function ChartPanel() {
     }
   }, [quote?.session, data, symbol, client]);
 
-  const last = quote?.price_cents ?? data?.bars.c.at(-1) ?? null;
-  const prev = quote?.prev_close_cents ?? (data && data.bars.c.length > 1 ? data.bars.c.at(-2)! : null);
+  const shown = data && data.symbol === symbol ? data : undefined; // not the previous symbol's placeholder
+  const last = quote?.price_cents ?? shown?.bars.c.at(-1) ?? null;
+  const prev = quote?.prev_close_cents ?? (shown && shown.bars.c.length > 1 ? shown.bars.c.at(-2)! : null);
   const change = last != null && prev ? last - prev : null;
-  const shown = data && data.symbol === symbol ? data : undefined;
 
   return (
     <div className="grid min-h-0 grid-rows-[auto_1fr] bg-panel">

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, LoaderCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LineChart } from "../components/LineChart";
@@ -294,20 +294,31 @@ export function ModelLab() {
   const runs = useQuery({ queryKey: ["runs", symbol, params.interval], queryFn: () => api.runs(symbol, params.interval) });
   const shownId = chosen ?? runs.data?.find((r) => r.active)?.id ?? runs.data?.[0]?.id ?? null;
   const run = useQuery({ queryKey: ["run", shownId], queryFn: () => api.run(shownId!), enabled: shownId != null });
-  useEffect(() => onJob((s, p) => s === symbol && setProgress(p)), [symbol]);
+  const testing = useRef<string | null>(null); // the symbol under test; progress events can arrive after the reply
+  const onScreen = useRef(symbol);
+  useEffect(() => {
+    onScreen.current = symbol;
+  }, [symbol]);
+  useEffect(() => onJob((s, p) => s === testing.current && s === onScreen.current && setProgress(p)), []);
   useEffect(() => setChosen(null), [symbol, params.interval]);
 
   const start = useMutation({
     mutationFn: () => api.newRun(symbol, params),
-    onMutate: () => setProgress(0),
+    onMutate: () => {
+      testing.current = symbol;
+      setProgress(0);
+    },
     onSuccess: (r) => {
       client.setQueryData(["run", r.id], r);
-      client.invalidateQueries({ queryKey: ["runs", symbol] });
-      setChosen(r.id);
-      save({ lab: { ...params, symbol } });
+      client.invalidateQueries({ queryKey: ["runs", r.symbol] });
+      if (r.symbol === onScreen.current) setChosen(r.id);
+      save({ lab: { ...r.params, symbol: r.symbol } });
     },
     onError: (e) => toast.error("The test couldn't run", { description: e.message }),
-    onSettled: () => setProgress(null),
+    onSettled: () => {
+      testing.current = null;
+      setProgress(null);
+    },
   });
   const activate = useMutation({
     mutationFn: api.activate,

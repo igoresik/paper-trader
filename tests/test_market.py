@@ -47,6 +47,18 @@ def test_refresh_stores_cents_and_leaves_out_the_bar_still_trading(monkeypatch):
     ]
 
 
+def test_refresh_keeps_the_splits_yahoo_marks(monkeypatch):
+    serve(monkeypatch, daily(["2026-10-13", "2026-10-14"], [100.0, 101.0]).assign(**{"Stock Splits": [0.0, 10.0]}))
+    market.refresh("SPY", "1d", now=ny(2026, 10, 20, 12))
+    hourly = pd.DataFrame({"Open": [101.0], "High": [102.0], "Low": [100.0], "Close": [101.0], "Volume": [1_000],
+                           "Stock Splits": [10.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-10-14 09:30", tz=NY)]))
+    serve(monkeypatch, hourly)
+    market.refresh("SPY", "1h", now=ny(2026, 10, 20, 12))  # the same split, on the day's first hour
+    assert db.query("SELECT symbol, ts, ratio FROM splits") == [{"symbol": "SPY", "ts": ny(2026, 10, 14), "ratio": 10.0}]
+    factor = market.split_factor("SPY")
+    assert (factor(ny(2026, 10, 13, 15)), factor(ny(2026, 10, 14))) == (10.0, 1)
+
+
 def test_refresh_replaces_the_old_bars(monkeypatch):
     serve(monkeypatch, daily(["2026-10-13", "2026-10-14"], [200.0, 202.0]))
     market.refresh("SPY", "1d", now=ny(2026, 10, 20, 12))

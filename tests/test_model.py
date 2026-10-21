@@ -99,3 +99,12 @@ def test_live_record_grades_signals_once_the_next_bar_closes(put_bars):
         conn.executemany("INSERT INTO signals VALUES (?, ?, ?, ?, ?, 0.5, 0.5, 0.3, 0.2, 1)", rows)
     # +1% (right), -1% (wrong), and the last one has no next bar yet
     assert model.live_record("SPY", "1d", 0.005) == {"n": 2, "right": 1}
+
+
+def test_live_record_compares_closes_across_a_split(put_bars):
+    put_bars("SPY", [50.0, 50.5])  # split-adjusted: $100.00 and $101.00 before a 2-for-1 split on the second day
+    with db.tx() as conn:
+        conn.execute("INSERT INTO models (id, symbol, interval, params, metrics) VALUES (1, 'SPY', '1d', '{}', '{}')")
+        conn.execute("INSERT INTO signals VALUES ('SPY', '1d', 1600000000, 10000, 'BUY', 0.5, 0.5, 0.3, 0.2, 1)")
+        conn.execute("INSERT INTO splits (symbol, ts, ratio) VALUES ('SPY', 1600086400, 2.0)")
+    assert model.live_record("SPY", "1d", 0.005) == {"n": 1, "right": 1}  # +1%, not -49.5%

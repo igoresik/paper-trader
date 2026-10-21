@@ -136,15 +136,16 @@ def _since(span, now=None):
     return int(now) - DAYS_BACK[span] * 86_400
 
 
-def _numbers(spec, count, example):
-    """'20:2' -> [20.0, 2.0]; an empty spec turns the indicator off."""
+def _numbers(spec, count, example, periods):
+    """'20:2' -> [20.0, 2.0]; an empty spec turns the indicator off. The first `periods` values count bars."""
     if not spec:
         return None
     try:
         values = [float(part) for part in spec.split(":")]
     except ValueError:
         values = []
-    if len(values) != count or not all(0 < v <= 500 for v in values):
+    if (len(values) != count or not all(0 < v <= 500 for v in values)
+            or not all(v.is_integer() for v in values[:periods])):
         raise HTTPException(422, f"Indicator settings should look like {example}.")
     return values
 
@@ -193,6 +194,14 @@ def create_app(run_worker=True):
     app.state.worker, app.state.hub = worker, hub
     # another website can point its own domain at 127.0.0.1; only answer requests addressed to this computer
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+
+    @app.middleware("http")
+    async def own_pages_only(request, call_next):
+        # any site can fire a plain POST at this computer; browsers always say where it came from
+        origin = request.headers.get("origin")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and origin and urlsplit(origin).hostname not in hosts:
+            return JSONResponse({"detail": "Only Paper Trader's own pages can change things.", "code": "origin"}, 403)
+        return await call_next(request)
 
     async def refused(request, error):
         return JSONResponse({"detail": str(error), "code": error.code}, status_code=error.status)
@@ -299,6 +308,7 @@ def create_app(run_worker=True):
         """Market order. Fills now at the live price; while the market is closed it waits for the next open,
         unless Practice mode is on, which fills at the last price."""
         symbol = known(body.symbol)
+        worker.check_splits(symbol)  # on a split day, before the shares held are checked
         costs, prefs = settings.costs(), settings.get()
         price, practice = worker.fresh_price(symbol), False
         if price is None and prefs["practice_mode"]:
@@ -322,6 +332,7 @@ def create_app(run_worker=True):
     def place_order(body: OrderIn):
         """A limit or stop order. It waits until the price reaches it, even while the app is closed."""
         symbol = known(body.symbol)
+        worker.check_splits(symbol)
         order = ledger.place_order(body.account_id, symbol, body.side, body.type, body.shares, body.limit_cents,
                                    body.stop_cents, ref_price_cents=worker.price(symbol), costs=settings.costs())
         worker.orders_changed()
@@ -358,10 +369,12 @@ def create_app(run_worker=True):
     recent = {}  # (symbol, interval, period) -> (fetched at, bars): minute bars from Yahoo, reused for a minute
 
     def minute_frame(symbol, interval, period):
-        key = (symbol, interval, period)
-        if key not in recent or time.time() - recent[key][0] > 60:
-            recent[key] = (time.time(), market.intraday([symbol], period, interval).get(symbol, []))
-        merged = {r["ts"]: r for r in recent[key][1]}
+        key, now = (symbol, interval, period), time.time()
+        for stale in [k for k, (at, _) in list(recent.items()) if now - at > 60]:  # charts looked at once don't pile up
+            recent.pop(stale, None)
+        if not (entry := recent.get(key)):  # held here, so another request clearing it can't pull it away
+            entry = recent[key] = (now, market.intraday([symbol], period, interval).get(symbol, []))
+        merged = {r["ts"]: r for r in entry[1]}
         for bar in worker.session_bars(symbol, interval):  # the stream is fresher than Yahoo for today
             if old := merged.get(bar["ts"]):  # Yahoo saw the bar open; the stream saw its latest price
                 bar = {**bar, "open": old["open"], "high": max(old["high"], bar["high"]),
@@ -412,12 +425,12 @@ def create_app(run_worker=True):
                 if kind not in ("ema", "sma") or not n.isdigit() or not 1 < int(n) <= 500:
                     raise HTTPException(422, "Moving averages should look like ema:20 or sma:50.")
                 prices[key] = features.ema(close, int(n)) if kind == "ema" else close.rolling(int(n)).mean()
-        if (b := _numbers(bb, 2, "20:2")) is not None:
+        if (b := _numbers(bb, 2, "20:2", periods=1)) is not None:
             mid, band = features.bollinger(close, int(b[0]), b[1])
             prices |= {"bb_mid": mid, "bb_upper": mid + band, "bb_lower": mid - band}
-        if (r := _numbers(rsi, 1, "14")) is not None:
+        if (r := _numbers(rsi, 1, "14", periods=1)) is not None:
             points["rsi"] = features.rsi(close, int(r[0]))
-        if (m := _numbers(macd, 3, "12:26:9")) is not None:
+        if (m := _numbers(macd, 3, "12:26:9", periods=3)) is not None:
             prices["macd"], prices["macd_signal"], prices["macd_hist"] = features.macd(close, *map(int, m))
         keep = bars.index >= since
         shown = bars[keep]
@@ -444,7 +457,7 @@ def create_app(run_worker=True):
             held = [p for p in ledger.positions(account_id) if p["symbol"] == symbol]
             if held:
                 position = {"shares": held[0]["shares"],
-                            "avg_cost_cents": (2 * held[0]["cost_basis_cents"] + held[0]["shares"]) // (2 * held[0]["shares"])}
+                            "avg_cost_cents": ledger.avg_cost(held[0]["cost_basis_cents"], held[0]["shares"])}
             orders = [{"id": o["id"], "side": o["side"], "type": o["type"], "shares": o["shares"],
                        "price_cents": o["limit_cents"] or o["stop_cents"]}
                       for o in ledger.orders(account_id) if o["symbol"] == symbol and o["type"] != "MARKET"]
@@ -527,7 +540,7 @@ def create_app(run_worker=True):
 
     @app.put("/settings", tags=["app"])
     def put_settings(body: SettingsIn):
-        changes = body.model_dump(exclude_unset=True)
+        changes = body.model_dump(exclude_unset=True, exclude_none=True)  # a null would wipe out the default
         if changes.get("account_id") is not None:
             ledger.account(changes["account_id"])
         return settings.update(changes)
@@ -554,12 +567,12 @@ def create_app(run_worker=True):
         async def listen():
             try:
                 async for message in ws.iter_json():
-                    if message.get("type") == "watch" and isinstance(message.get("symbol"), str):
+                    if isinstance(message, dict) and message.get("type") == "watch" and isinstance(message.get("symbol"), str):
                         try:
                             worker.watch(market.clean(message["symbol"]))
                         except market.MarketError:
                             pass
-            except WebSocketDisconnect:
+            except (WebSocketDisconnect, ValueError):  # ValueError: a frame that isn't JSON
                 pass
 
         reader = asyncio.create_task(listen())

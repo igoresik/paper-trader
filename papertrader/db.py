@@ -46,14 +46,47 @@ def query(sql, params=()):
         return [dict(row) for row in conn.execute(sql, params)]
 
 
+# schema.sql is version 1; each step here moves a database up one version, so installed copies keep their data
+UPGRADES = [
+    """
+    -- splits Yahoo marked on the first day at the new price, and when held shares and open orders moved with them
+    CREATE TABLE splits (
+        symbol TEXT NOT NULL,
+        ts INTEGER NOT NULL, -- start of that day
+        ratio REAL NOT NULL CHECK (ratio > 0), -- new shares per old one: 10 for 10-for-1, 0.1 for 1-for-10
+        applied_at INTEGER,
+        PRIMARY KEY (symbol, ts)
+    ) WITHOUT ROWID;
+    -- what each split did to a portfolio; the ledger holds whole shares, so a leftover fraction is paid in cash
+    CREATE TABLE split_changes (
+        account_id INTEGER NOT NULL REFERENCES accounts (id),
+        symbol TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        ratio REAL NOT NULL,
+        shares_before INTEGER NOT NULL,
+        shares_after INTEGER NOT NULL,
+        cash_cents INTEGER NOT NULL CHECK (cash_cents >= 0),
+        PRIMARY KEY (account_id, symbol, ts)
+    ) WITHOUT ROWID;
+    PRAGMA user_version = 2;
+    """,
+]
+
+
+def _run(conn, script):
+    try:
+        conn.executescript("BEGIN;" + script + "COMMIT;")
+    except sqlite3.Error:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 def init():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never wait for a writer
         if conn.execute("PRAGMA user_version").fetchone()[0] == 0:
-            try:
-                conn.executescript("BEGIN;" + (ROOT / "schema.sql").read_text(encoding="utf-8") + "COMMIT;")
-            except sqlite3.Error:
-                if conn.in_transaction:
-                    conn.execute("ROLLBACK")
-                raise
+            _run(conn, (ROOT / "schema.sql").read_text(encoding="utf-8"))
+        for script in UPGRADES[conn.execute("PRAGMA user_version").fetchone()[0] - 1:]:
+            _run(conn, script)

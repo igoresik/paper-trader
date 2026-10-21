@@ -1,10 +1,11 @@
 """Paper ledger: portfolios, orders, fills and positions. Every change is one all-or-nothing transaction."""
 
+import math
 import sqlite3
 import time
 from dataclasses import dataclass
 
-from . import db
+from . import db, market
 
 
 class LedgerError(Exception):
@@ -42,6 +43,11 @@ class Costs:
 def money(cents):
     dollars, rest = divmod(abs(cents), 100)
     return f"{'-' if cents < 0 else ''}${dollars:,}.{rest:02d}"
+
+
+def avg_cost(basis_cents, shares):
+    """Cost per share, rounded half up to the cent."""
+    return (2 * basis_cents + shares) // (2 * shares)
 
 
 def _now():
@@ -353,6 +359,66 @@ def match(symbol, bars, costs=Costs()):
     return events
 
 
+# splits
+
+
+def _split_name(ratio):
+    return f"{ratio:g}-for-1" if ratio >= 1 else f"1-for-{1 / ratio:g}"
+
+
+def _whole(x):
+    return math.floor(x + 1e-9)  # 30 * 0.1 is 3.0000000000000004 in floating point
+
+
+def apply_splits(symbol, now=None):
+    """Put every portfolio and open order on the new share count of each split not applied yet. Shares held
+    through the split multiply, a leftover fraction is paid in cash at the last close, and open orders keep
+    their value. Shares traded since the split began are already on the new count."""
+    now, changes = now or _now(), []
+    if not db.query("SELECT 1 FROM splits WHERE symbol = ? AND applied_at IS NULL", (symbol,)):
+        return changes  # the usual case, without taking the write lock
+    with db.tx() as conn:
+        for split in _rows(conn, "SELECT ts, ratio FROM splits WHERE symbol = ? AND applied_at IS NULL ORDER BY ts",
+                           (symbol,)):
+            ts, ratio, name = split["ts"], split["ratio"], _split_name(split["ratio"])
+            last = _rows(conn, "SELECT close_cents FROM bars WHERE symbol = ? AND interval = '1d' AND ts < ?"
+                               " ORDER BY ts DESC LIMIT 1", (symbol, ts))
+            for pos in _rows(conn, "SELECT * FROM positions WHERE symbol = ?", (symbol,)):
+                since = _rows(conn, "SELECT COALESCE(SUM(CASE side WHEN 'BUY' THEN shares ELSE -shares END), 0) AS n"
+                                    " FROM trades WHERE account_id = ? AND symbol = ? AND executed_at >= ?",
+                              (pos["account_id"], symbol, ts))[0]["n"]
+                before = pos["shares"] - since
+                if before <= 0:
+                    continue
+                exact = before * ratio
+                after = _whole(exact)
+                cash = int((exact - after) * last[0]["close_cents"]) if last else 0
+                basis = pos["cost_basis_cents"] - int(pos["cost_basis_cents"] * (exact - after) / (exact + since))
+                if after + since:
+                    conn.execute("UPDATE positions SET shares = ?, cost_basis_cents = ? WHERE account_id = ? AND symbol = ?",
+                                 (after + since, basis, pos["account_id"], symbol))
+                else:
+                    conn.execute("DELETE FROM positions WHERE account_id = ? AND symbol = ?", (pos["account_id"], symbol))
+                conn.execute("UPDATE accounts SET cash_balance_cents = cash_balance_cents + ? WHERE id = ?",
+                             (cash, pos["account_id"]))
+                conn.execute("INSERT INTO split_changes VALUES (?, ?, ?, ?, ?, ?, ?)",
+                             (pos["account_id"], symbol, ts, ratio, before, after, cash))
+                changes.append({"symbol": symbol, "account_id": pos["account_id"], "split": name,
+                                "shares_before": before, "shares_after": after, "cash_cents": cash})
+            for order in _rows(conn, "SELECT * FROM orders WHERE symbol = ? AND status = 'OPEN' AND created_at < ?",
+                               (symbol, ts)):
+                shares = _whole(order["shares"] * ratio)
+                if not shares:
+                    conn.execute("UPDATE orders SET status = 'CANCELLED', reason = ?, closed_at = ? WHERE id = ?",
+                                 (f"The {name} split left this order with less than 1 share.", now, order["id"]))
+                    continue
+                price = {k: max(1, int(order[k] / ratio + 0.5)) if order[k] else None for k in ("limit_cents", "stop_cents")}
+                conn.execute("UPDATE orders SET shares = ?, limit_cents = ?, stop_cents = ? WHERE id = ?",
+                             (shares, price["limit_cents"], price["stop_cents"], order["id"]))
+            conn.execute("UPDATE splits SET applied_at = ? WHERE symbol = ? AND ts = ?", (now, symbol, ts))
+    return changes
+
+
 # reading
 
 
@@ -412,7 +478,7 @@ def portfolio(account_id, price, prev_close, day_start):
         if shares:
             rows.append({
                 "symbol": symbol, "shares": shares, "cost_basis_cents": basis,
-                "avg_cost_cents": (2 * basis + shares) // (2 * shares), "last_cents": last,
+                "avg_cost_cents": avg_cost(basis, shares), "last_cents": last,
                 "prev_close_cents": prev, "market_value_cents": shares * last,
                 "unrealized_pnl_cents": shares * last - basis, "day_change_cents": change,
             })
@@ -436,16 +502,25 @@ def equity_curve(account_id, days, close_on):
     """Portfolio value at each day's close: cash then, plus the shares held then at that day's closing price.
     days are (daily bar start, moment of that day's close); close_on(symbol, day) gives cents."""
     acct = account(account_id)
-    trades = db.query(
-        "SELECT symbol, side, shares, cash_after_cents, executed_at FROM trades WHERE account_id = ?"
-        " ORDER BY executed_at, id",
-        (account_id,),
+    # cash_after_cents follows booking order, and a catch-up fill can be booked after a later one, so add up totals.
+    # Closes are split-adjusted, so shares count on today's share count: (moment, symbol, shares, cash) per change
+    trades = db.query("SELECT symbol, side, shares, total_cents, executed_at FROM trades WHERE account_id = ?",
+                      (account_id,))
+    paid = db.query("SELECT * FROM split_changes WHERE account_id = ?", (account_id,))
+    factor = {s: market.split_factor(s) for s in {t["symbol"] for t in trades}}
+    moves = sorted(
+        [(t["executed_at"], t["symbol"], t["shares"] * factor[t["symbol"]](t["executed_at"]), -t["total_cents"])
+         if t["side"] == "BUY" else
+         (t["executed_at"], t["symbol"], -t["shares"] * factor[t["symbol"]](t["executed_at"]), t["total_cents"])
+         for t in trades]
+        + [(c["ts"], c["symbol"], (c["shares_after"] - c["shares_before"] * c["ratio"]) * factor[c["symbol"]](c["ts"]),
+            c["cash_cents"]) for c in paid],  # the fraction paid out
+        key=lambda move: move[0],
     )
     values, held, cash, done = [], {}, acct["starting_cash_cents"], 0
     for day, closed_at in days:
-        while done < len(trades) and trades[done]["executed_at"] <= closed_at:
-            t = trades[done]
-            held[t["symbol"]] = held.get(t["symbol"], 0) + (t["shares"] if t["side"] == "BUY" else -t["shares"])
-            cash, done = t["cash_after_cents"], done + 1
-        values.append(cash + sum(n * (close_on(symbol, day) or 0) for symbol, n in held.items() if n))
+        while done < len(moves) and moves[done][0] <= closed_at:
+            _, symbol, shares, money_in = moves[done]
+            held[symbol], cash, done = held.get(symbol, 0) + shares, cash + money_in, done + 1
+        values.append(cash + round(sum(n * (close_on(symbol, day) or 0) for symbol, n in held.items() if abs(n) > 1e-9)))
     return values

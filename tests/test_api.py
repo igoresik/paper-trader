@@ -1,9 +1,11 @@
+import time
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from papertrader import api, market
+from papertrader import api, db, ledger, market
 
 
 def walk(n=400, seed=0):
@@ -19,6 +21,7 @@ def app(monkeypatch, put_bars):
     monkeypatch.setattr(market, "needs_refresh", lambda *args, **kwargs: False)
     monkeypatch.setattr(market, "refresh", offline)
     monkeypatch.setattr(market, "intraday", offline)
+    monkeypatch.setattr(market, "check_splits", lambda symbol: None)
     put_bars("AAPL", *walk())
     application = api.create_app(run_worker=False)
     application.state.worker.fresh_price = lambda symbol: 15_000  # a live $150.00
@@ -85,6 +88,13 @@ def test_other_sites_cannot_listen_to_live_updates(client):
         assert ws.receive_json()["type"] == "hello"
 
 
+def test_other_sites_cannot_change_anything(client):
+    # a page elsewhere can still fire a plain POST at this computer, even if it can't read the answer
+    refused = client.post("/models/runs/1/activate", headers={"origin": "http://evil.example"})
+    assert refused.status_code == 403
+    assert client.post("/models/runs/1/activate", headers={"origin": "http://127.0.0.1:5173"}).json()["code"] == "model"
+
+
 def test_the_signal_comes_with_its_reasons_and_record(client):
     signal = client.get("/market/AAPL/signal").json()
     assert signal["signal"] in ("BUY", "HOLD", "SELL")
@@ -103,10 +113,26 @@ def test_limit_orders_wait_and_can_be_cancelled_once(client):
     assert client.delete(f"/orders/{order['id']}").status_code == 409
 
 
+def test_an_order_on_a_split_day_sees_the_new_share_count(app, client, monkeypatch):
+    acc = open_account(client, cash=1_000_000)
+    ledger.execute_market(acc, "AAPL", "BUY", 10, 30_000, now=int(time.time()) - 3 * 86_400)
+
+    def yahoo_marks_a_split(symbol):
+        with db.tx() as conn:
+            conn.execute("INSERT OR IGNORE INTO splits (symbol, ts, ratio) VALUES (?, ?, 2.0)",
+                         (symbol, market.day_start(time.time())))
+
+    monkeypatch.setattr(market, "check_splits", yahoo_marks_a_split)
+    monkeypatch.setattr(market, "session", lambda now=None: "regular")
+    assert market_order(client, acc, 15, side="SELL").status_code == 200  # 10 old shares are 20 new ones
+    assert ledger.positions(acc)[0]["shares"] == 5
+
+
 def test_settings_are_checked(client):
     assert client.put("/settings", json={"slippage_bps": -1}).status_code == 422
     assert client.put("/settings", json={"nonsense": 1}).status_code == 422
     assert client.put("/settings", json={"theme": "dark"}).json()["theme"] == "dark"
+    assert client.put("/settings", json={"commission_cents": None}).json()["commission_cents"] == 0
 
 
 def test_chart_lines_up_with_its_bars(client):
@@ -121,6 +147,8 @@ def test_chart_lines_up_with_its_bars(client):
     weekly = client.get("/market/AAPL/chart", params={"interval": "1w", "range": "all"}).json()
     assert 55 <= len(weekly["bars"]["t"]) <= 60
     assert client.get("/market/AAPL/chart", params={"ma1": "wma:5"}).status_code == 422
+    assert client.get("/market/AAPL/chart", params={"rsi": "0.5"}).status_code == 422
+    assert client.get("/market/AAPL/chart", params={"bb": "20:0.5"}).status_code == 200
 
 
 def test_chart_adds_the_bar_still_forming(app, client):

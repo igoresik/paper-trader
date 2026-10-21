@@ -109,12 +109,14 @@ export function connect(client: QueryClient) {
       case "fill": {
         const fill = event as unknown as Trade;
         refresh(["portfolio"], ["orders"], ["history"], ["chart", fill.symbol], ["equity"]);
-        if (!shown.has(fill.id)) {
+        // the event can beat the ticket's own HTTP reply; wait for it, so a fill shown as a receipt doesn't toast too
+        setTimeout(() => {
+          if (shown.has(fill.id)) return;
           const verb = fill.side === "BUY" ? "Bought" : "Sold";
           toast.success(`${verb} ${shares(fill.shares)} ${fill.symbol} at ${money(fill.price_cents)}`, {
             description: fill.type === "MARKET" ? "Your queued market order filled at the open." : `Your ${fill.type.toLowerCase()} order filled.`,
           });
-        }
+        }, 2_000);
         break;
       }
       case "rejected":
@@ -124,6 +126,15 @@ export function connect(client: QueryClient) {
       case "order":
         refresh(["portfolio"], ["orders"], ["chart", (event as unknown as Order).symbol]);
         break;
+      case "split": {
+        const cash = Number(event.cash_cents);
+        refresh(["portfolio"], ["orders"], ["chart", event.symbol], ["equity"]);
+        toast.info(`${event.symbol} split ${event.split}`, {
+          description: `${shares(Number(event.shares_before))} shares became ${shares(Number(event.shares_after))}`
+            + (cash ? `, plus ${money(cash)} for the fraction left over` : "") + ". Open orders moved to the new share count.",
+        });
+        break;
+      }
       case "signal":
       case "history":
         refresh(["watchlist"], ["signal", event.symbol], ["chart", event.symbol]);
