@@ -209,10 +209,14 @@ export interface Run {
     backtest: {
       strategy: Performance;
       buy_hold: Performance;
+      /** sized by the model's lean, and holding its average size all the time; runs from before 1.2 lack them */
+      sized?: Performance;
+      steady?: Performance;
       exposure: number;
+      sized_exposure?: number;
       trades: number;
       hit_rate: number | null;
-      curve?: { t: number[]; strategy: number[]; buy_hold: number[] };
+      curve?: { t: number[]; strategy: number[]; buy_hold: number[]; sized?: number[]; steady?: number[] };
     };
     track_record?: Band[];
     move?: { summary: Summary; track_record: Band[]; base_rate: number };
