@@ -139,7 +139,8 @@ class Worker:
                 self.publish({"type": "history", "symbol": symbol, "interval": interval})
             last = db.query("SELECT MAX(ts) AS ts FROM bars WHERE symbol = ? AND interval = ?", (symbol, interval))[0]["ts"]
             shown = db.query("SELECT 1 FROM signals WHERE symbol = ? AND interval = ? AND ts = ?", (symbol, interval, last))
-            if last is not None and (refreshed or not shown):
+            # after a restart too, so the watchlist shows the active model's call rather than the first one stored
+            if last is not None and (refreshed or not shown or (symbol, interval) not in model.latest):
                 try:
                     signal = model.live_signal(symbol, interval)
                 except model.ModelError as error:

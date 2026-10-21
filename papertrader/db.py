@@ -84,6 +84,20 @@ UPGRADES = [
     CREATE UNIQUE INDEX account_name ON accounts (name) WHERE archived_at IS NULL AND replay_at IS NULL;
     PRAGMA user_version = 4;
     """,
+    """
+    -- the move reading shown live: how likely the next bar moves more than usual (usual = the median size of the
+    -- last 60 moves, as a share of the price), kept like signals so its live record can't be rewritten
+    CREATE TABLE move_signals (
+        symbol TEXT NOT NULL,
+        interval TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        usual REAL NOT NULL,
+        p_big REAL NOT NULL CHECK (p_big BETWEEN 0 AND 1),
+        model_id INTEGER NOT NULL REFERENCES models (id),
+        PRIMARY KEY (symbol, interval, ts)
+    ) WITHOUT ROWID;
+    PRAGMA user_version = 5;
+    """,
 ]
 
 

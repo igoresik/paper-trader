@@ -562,6 +562,9 @@ def create_app(run_worker=True):
                   for r in db.query(
             "SELECT symbol, signal, confidence, ts, model_id FROM signals s WHERE interval = '1d'"
             " AND ts = (SELECT MAX(ts) FROM signals WHERE symbol = s.symbol AND interval = '1d')")}
+        for (symbol, interval), worked_out in list(model.latest.items()):  # the active model's call, when known
+            if interval == "1d" and worked_out["ts"] >= latest.get(symbol, {}).get("ts", 0):
+                latest[symbol] = worked_out
         return [{**item, "price_cents": worker.price(item["symbol"]), "prev_close_cents": worker.prev_close(item["symbol"]),
                  "quote": worker.quotes.get(item["symbol"]), "signal": latest.get(item["symbol"])} for item in items]
 

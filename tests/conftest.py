@@ -1,12 +1,14 @@
 import pytest
 
-from papertrader import db
+from papertrader import db, model
 
 
 @pytest.fixture(autouse=True)
 def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
     db.init()
+    model._fitted.clear()  # keyed by model id, which every fresh database starts again at 1
+    model.latest.clear()
 
 
 @pytest.fixture

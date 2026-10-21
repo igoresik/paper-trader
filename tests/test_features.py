@@ -76,3 +76,11 @@ def test_market_context_adds_momentum_and_the_columns_it_is_given():
     assert table["ret_5"].iloc[10] == pytest.approx(close.iloc[10] / close.iloc[5] - 1)
     assert {"vix", "vix_change", "yield_change"} <= set(table.columns)
     assert "vix" not in features.indicators(close, volume, Params(context=True), None).columns
+
+
+def test_a_move_counts_as_big_when_it_beats_the_usual_size_known_before_it():
+    close = series([100, 101, 100, 101, 104, 104.1])  # moves: 1%, ~1%, 1%, ~3%, ~0.1%
+    labels, usual = features.move_labels(close, window=3)
+    assert labels.iloc[:3].isna().all()  # no usual size yet
+    assert usual.iloc[3] == pytest.approx(0.0099, abs=1e-3)
+    assert list(labels.iloc[3:5]) == [1.0, -1.0] and np.isnan(labels.iloc[5])  # then +3% is big, +0.1% is not

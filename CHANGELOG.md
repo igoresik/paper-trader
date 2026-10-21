@@ -7,6 +7,9 @@
 - A report card for you on the Portfolio page: sales that made money, average win and loss, biggest drop, costs paid including slippage, time in the market, and SPY and SPY's model over the same days.
 - History replay: trade a symbol's past one day at a time, scored against buying and holding and against the model's out-of-sample calls.
 - A banner when Yahoo Finance can't be reached, and an optional check for new versions on GitHub.
+- Models train on all of a symbol's daily history (SPY from 1993) instead of five years, and new runs also read the VIX, the 10-year yield and 5- and 20-day moves.
+- A move reading next to the signal: whether the next bar moves more than usual, with its own out-of-sample test and live record. Model lab also scores up against down alone.
+- A Buy or Sell call now has to get the direction right on days that moved, not just beat how often that kind of day comes; Hold is left to the move reading.
 - MIT license.
 
 ## 1.0.0 (2026-10-21)

@@ -110,10 +110,12 @@ export interface Summary {
   tries?: number;
   verdict: string;
   fold_balanced_accuracy: { mean: number; std: number };
+  /** up against down alone, on days that moved and where it called a direction; three-way runs from 1.2 on */
+  direction?: { n: number; right: number; range: [number, number] | null };
 }
 
 export interface Band {
-  signal: Call;
+  signal: Call | "BIG" | "QUIET";
   from: number;
   to: number;
   n: number;
@@ -136,9 +138,24 @@ export interface SignalReport {
   band: Band | null;
   /** how often this outcome happened anyway, out of sample */
   base_rate: number;
-  /** right clearly more often than base_rate in its confidence band */
+  /** buy and sell: its band's days that moved past the threshold, and how many went its way */
+  moved?: { n: number; right: number } | null;
+  /** hold: right clearly more often than base_rate in its band; buy and sell: right on direction clearly over half the time */
   clear: boolean;
   live_record: { n: number; right: number };
+  /** how likely the next bar moves more than usual, judged like the signal; absent until the model is retested */
+  move?: {
+    call: "BIG" | "QUIET";
+    p_big: number;
+    confidence: number;
+    /** the median size of the last 60 moves, as a share of the price */
+    usual: number;
+    band: Band | null;
+    base_rate: number;
+    clear: boolean;
+    summary: Summary;
+    live_record: { n: number; right: number };
+  };
   price_cents: number | null;
 }
 
@@ -196,6 +213,7 @@ export interface Run {
       curve?: { t: number[]; strategy: number[]; buy_hold: number[] };
     };
     track_record?: Band[];
+    move?: { summary: Summary; track_record: Band[]; base_rate: number };
     importance?: Record<string, number>;
     rows?: number;
     from?: number;
