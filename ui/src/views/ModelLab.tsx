@@ -21,11 +21,12 @@ const DEFAULTS: RunParams = {
   folds: 5,
   min_confidence: 0,
   cost_bps: 5,
-  indicators: { rsi: 14, ema_fast: 12, ema_slow: 26, bb: 20, bb_k: 2, vol: 20, context: true },
+  indicators: { rsi: 14, ema_fast: 12, ema_slow: 26, bb: 20, bb_k: 2, vol: 20, context: true, regime: true },
 };
 const FEATURE_NAMES: Record<string, string> = {
   rsi: "RSI", ema_spread: "EMA gap", vol_z: "Volume z-score", pct_b: "Bollinger %B", bb_width: "Band width",
   ret_5: "5-day move", ret_20: "20-day move", vix: "VIX", vix_change: "VIX, 5-day change", yield_change: "Yield, 5-day change",
+  vol_ratio: "Volatility, 5 vs 60 days", ret_z: "Move in volatility units", ret_5_z: "5-day move in volatility units",
 };
 const pct = (v: number, digits = 1) => percent(v, { digits });
 
@@ -100,6 +101,11 @@ function Form({ params, set }: { params: RunParams; set: (p: RunParams) => void 
           checked={params.indicators.context ?? false}
           onChange={(context) => set({ ...params, indicators: { ...params.indicators, context } })}
           label="Market context: VIX, 10-year yield, 5- and 20-day moves"
+        />
+        <Switch
+          checked={params.indicators.regime ?? false}
+          onChange={(regime) => set({ ...params, indicators: { ...params.indicators, regime } })}
+          label="Volatility regime: recent swings against the usual, and moves measured in them"
         />
       </Group>
       <Group title="Test">
