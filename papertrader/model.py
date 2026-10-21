@@ -346,6 +346,20 @@ def live_record(symbol, interval, threshold):
     return {"n": len(done), "right": right}
 
 
+def follow(symbol, since, interval="1d"):
+    """What going long after each live BUY signal, and staying out otherwise, made from since. Only bars that
+    got a signal shown (the app was running) and whose next bar has closed count."""
+    rows = db.query(
+        "SELECT s.ts, s.signal, s.close_cents, (SELECT b.close_cents FROM bars b WHERE b.symbol = s.symbol"
+        " AND b.interval = s.interval AND b.ts > s.ts ORDER BY b.ts LIMIT 1) AS next_close"
+        " FROM signals s WHERE s.symbol = ? AND s.interval = ? AND s.ts >= ? ORDER BY s.ts",
+        (symbol, interval, since),
+    )
+    done, factor = [r for r in rows if r["next_close"] is not None], market.split_factor(symbol)
+    growth = np.prod([r["next_close"] * factor(r["ts"]) / r["close_cents"] for r in done if r["signal"] == "BUY"])
+    return {"return": float(growth - 1), "days": len(done)}
+
+
 def report(symbol, interval):
     """Everything the signal card shows: the signal, the indicators behind it and the model's record."""
     signal = live_signal(symbol, interval)

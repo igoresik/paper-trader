@@ -272,9 +272,8 @@ def create_app(run_worker=True):
         return Response(out.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="paper-trader-{name}.csv"'})
 
-    @app.get("/portfolio/{account_id}/equity", tags=["portfolio"])
-    def equity(account_id: int, span: Annotated[str, Query(alias="range")] = "all"):
-        """Daily value of the portfolio and of SPY, both indexed to 100 at the start of the range."""
+    def trading_days(account_id, span):
+        """The portfolio's days in this range as (bar start, close) pairs, a close lookup, and SPY's bars."""
         acct = ledger.account(account_id)
         start = max(market.day_start(acct["created_at"]), _since(span))
         spy = market.frame("SPY", "1d", since=start)
@@ -286,6 +285,12 @@ def create_app(run_worker=True):
             upto = closes[symbol][closes[symbol].index <= day]
             return int(upto.iloc[-1]) if len(upto) else None
 
+        return days, close_on, spy
+
+    @app.get("/portfolio/{account_id}/equity", tags=["portfolio"])
+    def equity(account_id: int, span: Annotated[str, Query(alias="range")] = "all"):
+        """Daily value of the portfolio and of SPY, both indexed to 100 at the start of the range."""
+        days, close_on, spy = trading_days(account_id, span)
         t, values = [d for d, _ in days], ledger.equity_curve(account_id, days, close_on)
         bench = [round(c * 100) for c in spy["close"]]
         today = worker.day_start()
@@ -298,6 +303,25 @@ def create_app(run_worker=True):
             "equity_index": [round(v / values[0] * 100, 3) for v in values],
             "benchmark": "SPY",
             "benchmark_index": [round(b / base_b * 100, 3) if b and base_b else None for b in bench],
+        }
+
+    @app.get("/portfolio/{account_id}/report", tags=["portfolio"])
+    def report_card(account_id: int):
+        """The trader's record since the portfolio opened, next to SPY and to following SPY's model over the same days."""
+        curve = equity(account_id)
+        days, close_on, _ = trading_days(account_id, "all")
+        card = ledger.report_card(account_id, days, close_on)
+        if len(curve["t"]) < 2:  # comparisons start once there is a close to measure from
+            return {**card, "max_drawdown": None, "since": None, "return": None, "spy_return": None,
+                    "model": {"return": 0.0, "days": 0}}
+        spy = curve["benchmark_index"]
+        return {
+            **card,
+            "max_drawdown": ledger.max_drawdown(curve["equity_cents"]),
+            "since": curve["t"][0],
+            "return": curve["equity_index"][-1] / 100 - 1,
+            "spy_return": spy[-1] / 100 - 1 if spy[-1] else None,
+            "model": model.follow("SPY", curve["t"][0]),
         }
 
     # orders

@@ -221,6 +221,25 @@ export interface Equity {
   benchmark_index: (number | null)[];
 }
 
+export interface ReportCard {
+  sells: number;
+  wins: number;
+  avg_win_cents: number | null;
+  avg_loss_cents: number | null;
+  commission_cents: number;
+  slippage_cents: number;
+  /** share of closes with shares held; null before the first close */
+  time_in_market: number | null;
+  /** biggest fall from a peak close, as a negative fraction; the comparisons are null before the first close */
+  max_drawdown: number | null;
+  /** first day of the comparison */
+  since: number | null;
+  return: number | null;
+  spy_return: number | null;
+  /** going long on SPY's live buy signals over the same days */
+  model: { return: number; days: number };
+}
+
 export interface ChartPrefs {
   type: "candles" | "hollow" | "bars" | "line" | "area" | "heikin";
   interval: Interval;
@@ -313,6 +332,7 @@ export const api = {
     ),
   historyCsvUrl: (id: number) => `/portfolio/${id}/history.csv`,
   equity: (id: number, range: string) => call<Equity>("GET", `/portfolio/${id}/equity${q({ range })}`),
+  report: (id: number) => call<ReportCard>("GET", `/portfolio/${id}/report`),
   execute: (accountId: number, symbol: string, side: Side, shares: number) =>
     call<Trade | Order>("POST", "/orders/execute", { account_id: accountId, symbol, side, shares }),
   placeOrder: (body: { account_id: number; symbol: string; side: Side; type: "LIMIT" | "STOP"; shares: number; limit_cents?: number; stop_cents?: number }) =>
