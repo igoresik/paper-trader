@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1 (not released yet)
+
+- A Buy or Sell call now also has to beat how often its direction came anyway on the days that moved. SPY went up on about 54% of them, so Buy calls that were right 55% of the time no longer show as a clear call.
+
 ## 1.2.0 (2026-10-21)
 
 - New runs also read the volatility regime: the last 5 days' swings against the last 60's, and the latest 1- and 5-day moves measured in those swings.

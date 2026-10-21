@@ -66,7 +66,7 @@ It is never tested on a random split, because that would let the future leak int
 
 **Could it be luck?** The edge over the best simple rule gets a likely range, from resampling the tested days in blocks of 20 (neighbouring days move together, so single days would overstate the evidence). Every Model lab run on the same data is another chance to look good by luck, so the range widens with each one. The verdict follows the range: better only when the whole range is above zero.
 
-**Is this call worth anything?** A Buy or Sell only shows when calls like it, at that confidence and out of sample, got the direction right clearly more than half the time on the days that moved. Otherwise the card says **No clear edge** and shows which way the model leans. Hold never shows as a call on its own: how big the move will be is the move reading's question, and it gets the same test (right clearly more often than that happens anyway).
+**Is this call worth anything?** A Buy or Sell only shows when calls like it, at that confidence and out of sample, got the direction right on the days that moved clearly more than half the time, and clearly more often than that direction came anyway. SPY went up on about 54% of the days that moved, so a Buy that is right 55% of the time only follows the drift. Otherwise the card says **No clear edge** and shows which way the model leans. Hold never shows as a call on its own: how big the move will be is the move reading's question, and it gets the same test (right clearly more often than that happens anyway).
 
 On SPY's whole history (a run on 21 October 2026, tested on 7,050 days from October 1998 on), the honest answer was:
 

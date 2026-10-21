@@ -126,7 +126,7 @@ export function SignalCard() {
           <Probabilities s={s} />
           <p className="text-[12px] leading-snug text-ink-2">
             {s.moved?.n
-              ? `When it said ${s.signal.toLowerCase()} this sure before, ${ahead > 1 ? `a barrier was reached within ${ahead} ${bar}s ${s.moved.n} times, and it was the right one` : `${s.moved.n} of those days moved more than ${percent(s.model.threshold, { digits: 1 })}, and it had the direction right`} on ${s.moved.right} (${percent(s.moved.right / s.moved.n, { digits: 0 })}). A coin toss is 50%.`
+              ? `When it said ${s.signal.toLowerCase()} this sure before, ${ahead > 1 ? `a barrier was reached within ${ahead} ${bar}s ${s.moved.n} times, and it was the right one` : `${s.moved.n} of those days moved more than ${percent(s.model.threshold, { digits: 1 })}, and it had the direction right`} on ${s.moved.right} (${percent(s.moved.right / s.moved.n, { digits: 0 })}). ${s.moved.base_rate > 0.5 ? `${s.signal === "BUY" ? "Up" : "Down"} came ${percent(s.moved.base_rate, { digits: 0 })} of the time anyway.` : "A coin toss is 50%."}`
               : s.band
                 ? `When it said ${s.signal.toLowerCase()} this sure before, it was right ${s.band.right} of ${s.band.n} times (${percent(s.band.right / s.band.n, { digits: 0 })}). A ${s.signal.toLowerCase()} day came ${percent(s.base_rate, { digits: 0 })} of the time anyway.`
                 : "It hasn't made this call at this confidence out of sample yet."}{" "}
