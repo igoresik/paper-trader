@@ -136,15 +136,16 @@ def _since(span, now=None):
     return int(now) - DAYS_BACK[span] * 86_400
 
 
-def _numbers(spec, count, example):
-    """'20:2' -> [20.0, 2.0]; an empty spec turns the indicator off."""
+def _numbers(spec, count, example, periods):
+    """'20:2' -> [20.0, 2.0]; an empty spec turns the indicator off. The first `periods` values count bars."""
     if not spec:
         return None
     try:
         values = [float(part) for part in spec.split(":")]
     except ValueError:
         values = []
-    if len(values) != count or not all(0 < v <= 500 for v in values):
+    if (len(values) != count or not all(0 < v <= 500 for v in values)
+            or not all(v.is_integer() for v in values[:periods])):
         raise HTTPException(422, f"Indicator settings should look like {example}.")
     return values
 
@@ -420,12 +421,12 @@ def create_app(run_worker=True):
                 if kind not in ("ema", "sma") or not n.isdigit() or not 1 < int(n) <= 500:
                     raise HTTPException(422, "Moving averages should look like ema:20 or sma:50.")
                 prices[key] = features.ema(close, int(n)) if kind == "ema" else close.rolling(int(n)).mean()
-        if (b := _numbers(bb, 2, "20:2")) is not None:
+        if (b := _numbers(bb, 2, "20:2", periods=1)) is not None:
             mid, band = features.bollinger(close, int(b[0]), b[1])
             prices |= {"bb_mid": mid, "bb_upper": mid + band, "bb_lower": mid - band}
-        if (r := _numbers(rsi, 1, "14")) is not None:
+        if (r := _numbers(rsi, 1, "14", periods=1)) is not None:
             points["rsi"] = features.rsi(close, int(r[0]))
-        if (m := _numbers(macd, 3, "12:26:9")) is not None:
+        if (m := _numbers(macd, 3, "12:26:9", periods=3)) is not None:
             prices["macd"], prices["macd_signal"], prices["macd_hist"] = features.macd(close, *map(int, m))
         keep = bars.index >= since
         shown = bars[keep]

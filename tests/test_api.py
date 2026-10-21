@@ -129,6 +129,8 @@ def test_chart_lines_up_with_its_bars(client):
     weekly = client.get("/market/AAPL/chart", params={"interval": "1w", "range": "all"}).json()
     assert 55 <= len(weekly["bars"]["t"]) <= 60
     assert client.get("/market/AAPL/chart", params={"ma1": "wma:5"}).status_code == 422
+    assert client.get("/market/AAPL/chart", params={"rsi": "0.5"}).status_code == 422
+    assert client.get("/market/AAPL/chart", params={"bb": "20:0.5"}).status_code == 200
 
 
 def test_chart_adds_the_bar_still_forming(app, client):
