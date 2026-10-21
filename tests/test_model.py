@@ -140,7 +140,8 @@ def test_a_call_counts_only_when_it_beats_how_often_that_happens_anyway():
                 + [("BUY", 0.5, "BUY")] * 62)
     weak = model.call(1, "SELL", 0.36)
     assert (weak["clear"], weak["band"]["n"], round(weak["base_rate"], 2)) == (False, 100, 0.3)
-    predictions(2, [("SELL", 0.6, "SELL")] * 60 + [("SELL", 0.6, "HOLD")] * 40 + [("HOLD", 0.5, "HOLD")] * 300)
+    predictions(2, [("SELL", 0.6, "SELL")] * 60 + [("SELL", 0.6, "HOLD")] * 40 + [("HOLD", 0.5, "HOLD")] * 240
+                + [("HOLD", 0.5, "BUY")] * 60)
     assert model.call(2, "SELL", 0.6)["clear"]  # right 60% when sell days are 15%
     predictions(3, [("SELL", 0.6, "SELL")] * 10 + [("HOLD", 0.5, "HOLD")] * 90)
     assert not model.call(3, "SELL", 0.6)["clear"]  # 10 of 10, but 10 calls prove little
@@ -150,8 +151,20 @@ def test_a_call_counts_only_when_it_beats_how_often_that_happens_anyway():
     predictions(4, [("BUY", 0.4, "BUY")] * 40 + [("BUY", 0.4, "SELL")] * 35 + [("BUY", 0.4, "HOLD")] * 25
                 + [("HOLD", 0.5, "HOLD")] * 100 + [("HOLD", 0.5, "SELL")] * 25 + [("HOLD", 0.5, "BUY")] * 20)
     choppy = model.call(4, "BUY", 0.4)
-    assert choppy["moved"] == {"n": 75, "right": 40} and not choppy["clear"]
+    assert (choppy["moved"]["n"], choppy["moved"]["right"], choppy["clear"]) == (75, 40, False)
     assert not model.call(4, "HOLD", 0.5)["clear"]  # flat or not is the move reading's question
+
+
+def test_a_direction_call_has_to_beat_the_drift_too():
+    # on days that moved, up came 58% of the time whatever was said
+    predictions(5, [("BUY", 0.45, "BUY")] * 300 + [("BUY", 0.45, "SELL")] * 240 + [("BUY", 0.6, "BUY")] * 80
+                + [("BUY", 0.6, "SELL")] * 20 + [("SELL", 0.45, "SELL")] * 140 + [("SELL", 0.45, "BUY")] * 160
+                + [("HOLD", 0.5, "BUY")] * 360 + [("HOLD", 0.5, "SELL")] * 240)
+    drifting = model.call(5, "BUY", 0.45)  # right 56% of 540, clearly over half, but not over 58%
+    assert round(drifting["moved"]["base_rate"], 2) == 0.58 and not drifting["clear"]
+    assert model.call(5, "BUY", 0.6)["clear"]  # right 80% of 100
+    # down came 42% of the time; right 47% beats that but is still wrong more often than right
+    assert not model.call(5, "SELL", 0.45)["clear"]
 
 
 def test_following_the_live_signals_buys_only_on_buy_days(put_bars):
