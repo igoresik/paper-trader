@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (not released yet)
+## 1.1.0 (2026-10-21)
 
 - The signal card says **No clear edge** when a call hasn't beaten how often that outcome happens anyway, and the watchlist badge goes grey.
 - The model's verdict comes from a likely range for its edge, which widens with every Model lab run on the same data.
