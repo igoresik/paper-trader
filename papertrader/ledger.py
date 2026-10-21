@@ -44,6 +44,11 @@ def money(cents):
     return f"{'-' if cents < 0 else ''}${dollars:,}.{rest:02d}"
 
 
+def avg_cost(basis_cents, shares):
+    """Cost per share, rounded half up to the cent."""
+    return (2 * basis_cents + shares) // (2 * shares)
+
+
 def _now():
     return int(time.time())
 
@@ -412,7 +417,7 @@ def portfolio(account_id, price, prev_close, day_start):
         if shares:
             rows.append({
                 "symbol": symbol, "shares": shares, "cost_basis_cents": basis,
-                "avg_cost_cents": (2 * basis + shares) // (2 * shares), "last_cents": last,
+                "avg_cost_cents": avg_cost(basis, shares), "last_cents": last,
                 "prev_close_cents": prev, "market_value_cents": shares * last,
                 "unrealized_pnl_cents": shares * last - basis, "day_change_cents": change,
             })
