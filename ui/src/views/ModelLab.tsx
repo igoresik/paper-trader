@@ -204,6 +204,10 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
   const lines = useMemo(() => (curve ? [
     { label: "Follow the model", color: "--buy", values: curve.strategy },
     { label: "Buy and hold", color: "--ink-3", values: curve.buy_hold },
+    ...(curve.sized && curve.steady ? [
+      { label: "Sized by its lean", color: "--ma2", values: curve.sized },
+      { label: "Same size, always", color: "--ma1", values: curve.steady },
+    ] : []),
   ] : []), [curve]);
   const overfit = (m.folds ?? []).some((f) => f.train_balanced_accuracy - f.balanced_accuracy > 0.15);
   const kept = run.params.prune ? m.folds?.at(-1)?.inputs : undefined;
@@ -246,6 +250,13 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
         <p>
           <b className="font-semibold">As a strategy:</b> buying on its calls returned {percent(bt.strategy.total_return, { sign: true, digits: 1 })} against {percent(bt.buy_hold.total_return, { sign: true, digits: 1 })} for buy and hold over the same days, after {run.params.cost_bps} bps per trade.
         </p>
+        {bt.sized && bt.steady && bt.sized_exposure != null && (
+          <p>
+            <b className="font-semibold">Sized by its lean:</b> holding between half and all of the money, more when it leaned up harder than usual, returned{" "}
+            {percent(bt.sized.total_return, { sign: true, digits: 1 })} (Sharpe {bt.sized.sharpe.toFixed(2)}) against{" "}
+            {percent(bt.steady.total_return, { sign: true, digits: 1 })} (Sharpe {bt.steady.sharpe.toFixed(2)}) for holding its average {pct(bt.sized_exposure, 0)} all the time. The gap between the two is what sizing adds beyond being in the market.
+          </p>
+        )}
         {overfit && (
           <p className="flex items-start gap-1.5 text-[13px] text-warn">
             <CircleAlert className="mt-0.5 size-4 shrink-0" /> It scores much better on its training data than on new data: it is memorising. Try shallower trees or more bars per leaf.
