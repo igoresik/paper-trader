@@ -85,6 +85,24 @@ def labels(close, threshold):
     return pd.Series(label, index=close.index, dtype=float).where(change.notna())
 
 
+def barrier_labels(close, horizon):
+    """1 = BUY (within horizon bars the close rises by the barrier before it falls by it), -1 = SELL (falls first),
+    0 = HOLD (reaches neither). The barrier is the last 20 bars' volatility stretched to the horizon, so it is known
+    at the bar and wider in wild years. NaN until that is known, and on the last horizon bars."""
+    step = close.pct_change(fill_method=None)
+    size = (step.rolling(20).std() * np.sqrt(horizon)).to_numpy()[:, None]
+    c, n = close.to_numpy(), len(close)
+    path = np.full((n, horizon), np.nan)
+    for k in range(1, horizon + 1):
+        path[: n - k, k - 1] = c[k:] / c[: n - k] - 1
+    up, down = path >= size, path <= -size
+    first_up = np.where(up.any(axis=1), up.argmax(axis=1), horizon)
+    first_down = np.where(down.any(axis=1), down.argmax(axis=1), horizon)
+    label = np.select([first_up < first_down, first_down < first_up], [1.0, -1.0], 0.0)
+    known = ~np.isnan(size[:, 0]) & (np.arange(n) < n - horizon)
+    return pd.Series(np.where(known, label, np.nan), index=close.index)
+
+
 def move_labels(close, window=60):
     """1 = the next bar moves more than usual, -1 = less. Usual is the median size of the last window moves, all
     known by the bar's close, so about half the bars are each. Returns the labels and the usual size."""

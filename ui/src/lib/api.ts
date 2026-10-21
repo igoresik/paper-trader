@@ -134,7 +134,8 @@ export interface SignalReport {
   p_buy: number;
   model_id: number;
   indicators: Record<"rsi" | "ema_spread" | "vol_z" | "pct_b" | "bb_width", number>;
-  model: { id: number; created_at: number; estimator: string; threshold: number; summary: Summary };
+  /** horizon: bars ahead; above 1, which barrier the close reaches first */
+  model: { id: number; created_at: number; estimator: string; threshold: number; horizon: number; summary: Summary };
   band: Band | null;
   /** how often this outcome happened anyway, out of sample */
   base_rate: number;
@@ -192,6 +193,7 @@ export interface RunParams {
   min_confidence: number;
   cost_bps: number;
   prune?: boolean;
+  horizon?: number;
   indicators: { rsi: number; ema_fast: number; ema_slow: number; bb: number; bb_k: number; vol: number; context?: boolean; regime?: boolean };
 }
 

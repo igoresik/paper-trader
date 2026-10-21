@@ -97,3 +97,14 @@ def test_a_move_counts_as_big_when_it_beats_the_usual_size_known_before_it():
     assert labels.iloc[:3].isna().all()  # no usual size yet
     assert usual.iloc[3] == pytest.approx(0.0099, abs=1e-3)
     assert list(labels.iloc[3:5]) == [1.0, -1.0] and np.isnan(labels.iloc[5])  # then +3% is big, +0.1% is not
+
+
+def test_a_barrier_call_is_whichever_barrier_the_close_reaches_first():
+    steps = [0.01, -0.01] * 15  # 1% swings, so the 20-bar volatility is about 1% and a 4-bar barrier about 2%
+    close = series(100 * np.cumprod(1 + np.array([0, *steps, 0.015, 0.01, -0.01, -0.03, 0.001, 0.001, 0.001, 0.001, 0.001])))
+    labels = features.barrier_labels(close, 4)
+    assert labels.iloc[:20].isna().all()  # no volatility yet
+    assert labels.iloc[30] == 1  # +1.5% then +1%: up 2.5% before any fall
+    assert labels.iloc[32] == -1  # -1% then -3%
+    assert labels.iloc[35] == 0  # four quiet bars: neither barrier
+    assert labels.iloc[-4:].isna().all()  # the bars that would decide it haven't happened

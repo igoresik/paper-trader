@@ -40,7 +40,8 @@ function verdictLine(s: SignalReport) {
   const range = edge_range ? ` (an edge ${edgeRange(edge_range, tries)})` : "";
   const d = s.model.summary.direction;
   // the three-way score mostly comes from telling flat days from moves, so say how up against down alone did
-  const alone = d?.n ? ` Up or down alone, on days that moved, it was right ${percent(d.right / d.n, { digits: 0 })} of the time.` : "";
+  const moved = s.model.horizon > 1 ? "when a barrier was reached" : "on days that moved";
+  const alone = d?.n ? ` Up or down alone, ${moved}, it was right ${percent(d.right / d.n, { digits: 0 })} of the time.` : "";
   return `Out of sample this model is ${verdict}: balanced accuracy ${percent(scores.model.balanced_accuracy, { digits: 1 })} against ${percent(best, { digits: 1 })} for the best simple rule${range}.${alone}`;
 }
 
@@ -80,14 +81,18 @@ export function SignalCard() {
     staleTime: 60_000,
     retry: false,
   });
+  const bar = interval === "1h" ? "hour" : "day";
+  const ahead = s?.model.horizon ?? 1;
 
   return (
     <section aria-labelledby="signal-title" className="mt-3 rounded-lg border border-rule bg-raised p-3.5">
       <header className="flex items-center justify-between">
         <h2 id="signal-title" className="text-[13px] font-semibold">
-          Model signal <span className="font-normal text-ink-2">for the next {interval === "1h" ? "hour" : "day"}</span>
+          Model signal <span className="font-normal text-ink-2">for the next {ahead > 1 ? `${ahead} ${bar}s` : bar}</span>
         </h2>
-        <Tip text="The model reads RSI, the EMA spread, volume and the Bollinger position, and guesses whether the next bar closes more than the threshold up (buy), down (sell) or in between (hold). It is tested only on data it never trained on.">
+        <Tip text={ahead > 1
+          ? `The model reads its indicators and guesses whether over the next ${ahead} ${bar}s the close first rises by a barrier (buy), falls by it (sell) or reaches neither (hold). The barrier is the recent volatility stretched to ${ahead} ${bar}s. It is tested only on data it never trained on.`
+          : "The model reads RSI, the EMA spread, volume and the Bollinger position, and guesses whether the next bar closes more than the threshold up (buy), down (sell) or in between (hold). It is tested only on data it never trained on."}>
           <button type="button" aria-label="How the signal works" className="text-ink-3 hover:text-ink">
             <CircleHelp className="size-4" />
           </button>
@@ -121,7 +126,7 @@ export function SignalCard() {
           <Probabilities s={s} />
           <p className="text-[12px] leading-snug text-ink-2">
             {s.moved?.n
-              ? `When it said ${s.signal.toLowerCase()} this sure before, ${s.moved.n} of those days moved more than ${percent(s.model.threshold, { digits: 1 })}, and it had the direction right on ${s.moved.right} (${percent(s.moved.right / s.moved.n, { digits: 0 })}). A coin toss is 50%.`
+              ? `When it said ${s.signal.toLowerCase()} this sure before, ${ahead > 1 ? `a barrier was reached within ${ahead} ${bar}s ${s.moved.n} times, and it was the right one` : `${s.moved.n} of those days moved more than ${percent(s.model.threshold, { digits: 1 })}, and it had the direction right`} on ${s.moved.right} (${percent(s.moved.right / s.moved.n, { digits: 0 })}). A coin toss is 50%.`
               : s.band
                 ? `When it said ${s.signal.toLowerCase()} this sure before, it was right ${s.band.right} of ${s.band.n} times (${percent(s.band.right / s.band.n, { digits: 0 })}). A ${s.signal.toLowerCase()} day came ${percent(s.base_rate, { digits: 0 })} of the time anyway.`
                 : "It hasn't made this call at this confidence out of sample yet."}{" "}
@@ -135,7 +140,7 @@ export function SignalCard() {
                 {s.live_record.right} of {s.live_record.n} right
               </span>
             ) : (
-              "starts once the next bar closes."
+              ahead > 1 ? `starts ${ahead} ${bar}s after the first call.` : "starts once the next bar closes."
             )}
           </p>
           <dl className="grid grid-cols-5 gap-1 border-t border-rule pt-2 text-center text-[11px]">

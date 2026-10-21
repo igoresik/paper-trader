@@ -41,6 +41,7 @@ class Params:
     min_confidence: float = 0.0
     cost_bps: float = 5.0  # charged on every change of position in the backtest
     prune: bool = False  # drop inputs that don't help, picked inside each training window
+    horizon: int = 1  # bars ahead; above 1 the call is which barrier the close reaches first (features.barrier_labels)
     indicators: features.Params = field(default_factory=features.Params)
 
     @classmethod
@@ -80,7 +81,8 @@ def _inputs(X, y, p):
     if not p.prune:
         return list(X.columns)
     cut = int(len(X) * 0.8)
-    trial = _estimator(p).fit(X.iloc[:cut], y.iloc[:cut])
+    fit = cut - (p.horizon - 1)  # rows whose labels reach into the check rows would leak them
+    trial = _estimator(p).fit(X.iloc[:fit], y.iloc[:fit])
     drop = permutation_importance(trial, X.iloc[cut:], y.iloc[cut:], scoring="balanced_accuracy", n_repeats=5,
                                   random_state=0).importances_mean
     return [c for c, v in zip(X.columns, drop) if v > 0] or [X.columns[int(drop.argmax())]]
@@ -107,7 +109,8 @@ def dataset(symbol, p):
     bars = market.frame(symbol, p.interval)
     context = market.context(bars.index, p.interval) if p.indicators.context else None
     X = features.indicators(bars["close"], bars["volume"], p.indicators, context)
-    return bars, X, features.labels(bars["close"], p.threshold)
+    y = features.labels(bars["close"], p.threshold) if p.horizon == 1 else features.barrier_labels(bars["close"], p.horizon)
+    return bars, X, y
 
 
 def _scores(actual, pred):
@@ -120,9 +123,10 @@ def walk_forward(X, y, p, progress=None):
     Xk, yk = X[known], y[known].astype(int)
     if len(yk) < MIN_ROWS:
         raise ModelError(f"Not enough history to validate: {len(yk)} usable bars, {MIN_ROWS} needed.")
-    yesterday = yk.shift(1)  # the previous bar's label is already known when predicting
+    yesterday = yk.shift(p.horizon)  # the latest label already known when predicting
     folds, parts = [], []
-    for k, (train, test) in enumerate(TimeSeriesSplit(n_splits=p.folds).split(Xk), 1):
+    # a barrier label looks horizon bars ahead: the last training rows' labels would reach into the test bars' own
+    for k, (train, test) in enumerate(TimeSeriesSplit(n_splits=p.folds, gap=p.horizon - 1).split(Xk), 1):
         fitted = _fit(Xk.iloc[train], yk.iloc[train], p)
         proba = _predict(fitted, Xk.iloc[test])
         pred, conf = _decide(proba, p.min_confidence)
@@ -179,7 +183,7 @@ def edge_range(oos, tries=1, resamples=2_000, block=20, seed=0):
     return float(low), float(high)
 
 
-def summarize(folds, oos, tries=1):
+def summarize(folds, oos, tries=1, horizon=1):
     scores = {name: _scores(oos["actual"], oos[col]) for name, col in
               (("model", "pred"), ("majority", "majority"), ("always_buy", "always_buy"), ("yesterday", "yesterday"))}
     best = max(scores[name]["balanced_accuracy"] for name in ("majority", "always_buy", "yesterday"))
@@ -194,8 +198,9 @@ def summarize(folds, oos, tries=1):
     if (oos["actual"] == 0).any():  # a three-way model: score up against down on its own, where it called one
         called = oos[(oos["pred"] != 0) & (oos["actual"] != 0)]
         right = int((called["pred"] == called["actual"]).sum())
+        # barrier calls a day apart share most of their path: count each stretch of horizon bars once
         summary["direction"] = {"n": len(called), "right": right,
-                                "range": list(_wilson(right, len(called))) if len(called) else None}
+                                "range": list(_wilson(right / horizon, len(called) / horizon)) if len(called) else None}
     return summary
 
 
@@ -277,9 +282,11 @@ def _wilson(right, n, z=1.96):
     return float((centre - spread) / (1 + z * z / n)), float((centre + spread) / (1 + z * z / n))
 
 
-def _clear(band, base):
-    """A call counts when, in its confidence band, it was right clearly more often than its outcome happens anyway."""
-    return bool(band and band["n"] >= MIN_CALLS and _wilson(band["right"], band["n"])[0] > base)
+def _clear(band, base, horizon=1):
+    """A call counts when, in its confidence band, it was right clearly more often than its outcome happens anyway.
+    Barrier calls overlap, so horizon of them count as one."""
+    n, right = (band["n"] / horizon, band["right"] / horizon) if band else (0, 0)
+    return bool(n >= MIN_CALLS and _wilson(right, n)[0] > base)
 
 
 def call(model_id, signal, confidence):
@@ -287,7 +294,8 @@ def call(model_id, signal, confidence):
     SELL have to get the direction right clearly more than half the time on the days that moved: a BUY is also right
     more often whenever big moves are likely, either way. HOLD never is: how big the move will be is the move
     reading's job, and two answers to that question could only contradict each other."""
-    band = _band(run(model_id)["metrics"].get("track_record", []), signal, confidence)
+    chosen = run(model_id)
+    band = _band(chosen["metrics"].get("track_record", []), signal, confidence)
     base = db.query("SELECT AVG(actual = ?) AS rate FROM predictions WHERE model_id = ?", (signal, model_id))[0]["rate"] or 0.0
     if signal == "HOLD" or not band:
         return {"band": band, "base_rate": base, "moved": None, "clear": False}
@@ -296,7 +304,7 @@ def call(model_id, signal, confidence):
         " AND signal = ? AND actual != 'HOLD' AND confidence >= ? AND (confidence < ? OR ? = 1.0)",
         (model_id, signal, band["from"], band["to"], band["to"]),
     )[0]
-    return {"band": band, "base_rate": base, "moved": moved, "clear": _clear(moved, 0.5)}
+    return {"band": band, "base_rate": base, "moved": moved, "clear": _clear(moved, 0.5, Params.load(chosen["params"]).horizon)}
 
 
 def move_call(chosen, p_big):
@@ -324,7 +332,7 @@ def validate(symbol, p, progress=None):
     ).importances_mean
     tries = db.query("SELECT COUNT(*) AS n FROM models WHERE symbol = ? AND interval = ?", (symbol, p.interval))[0]["n"] + 1
     metrics = {
-        "summary": summarize(folds, oos, tries),
+        "summary": summarize(folds, oos, tries, p.horizon),
         "folds": folds,
         "confusion": confusion_matrix(oos["actual"], oos["pred"], labels=CLASSES).tolist(),  # rows: actual SELL, HOLD, BUY
         "backtest": backtest(oos, bars["close"], p),
@@ -450,14 +458,20 @@ def move_record(symbol, interval):
     return {"n": len(done), "right": right}
 
 
-def live_record(symbol, interval, threshold):
-    """How the signals shown live turned out, once the next bar closed."""
+def live_record(symbol, interval, threshold, horizon=1):
+    """How the signals shown live turned out, once the next bar closed (or, for barrier calls, the bars they cover).
+    Only signals from models that called the same horizon count."""
     rows = db.query(
         "SELECT s.ts, s.signal, s.close_cents, (SELECT b.close_cents FROM bars b WHERE b.symbol = s.symbol"
         " AND b.interval = s.interval AND b.ts > s.ts ORDER BY b.ts LIMIT 1) AS next_close"
-        " FROM signals s WHERE s.symbol = ? AND s.interval = ?",
-        (symbol, interval),
+        " FROM signals s JOIN models m ON m.id = s.model_id WHERE s.symbol = ? AND s.interval = ?"
+        " AND COALESCE(json_extract(m.params, '$.horizon'), 1) = ?",
+        (symbol, interval, horizon),
     )
+    if horizon > 1:  # graded on today's split-adjusted bars, the same way the model was tested
+        outcome = features.barrier_labels(market.frame(symbol, interval)["close"], horizon).dropna()
+        done = [r for r in rows if r["ts"] in outcome.index]
+        return {"n": len(done), "right": sum(NAMES[int(outcome[r["ts"]])] == r["signal"] for r in done)}
     done = [r for r in rows if r["next_close"] is not None]
     right, factor = 0, market.split_factor(symbol)
     for r in done:
@@ -504,12 +518,12 @@ def report(symbol, interval):
     """Everything the signal card shows: the signal, the indicators behind it and the model's record."""
     signal = live_signal(symbol, interval)
     chosen = run(signal["model_id"])
-    m = chosen["metrics"]
+    m, p = chosen["metrics"], Params.load(chosen["params"])
     return {
         **signal,
-        "model": {"id": chosen["id"], "created_at": chosen["created_at"], "estimator": chosen["params"]["estimator"],
-                  "threshold": chosen["params"]["threshold"], "summary": m["summary"]},
+        "model": {"id": chosen["id"], "created_at": chosen["created_at"], "estimator": p.estimator,
+                  "threshold": p.threshold, "horizon": p.horizon, "summary": m["summary"]},
         **call(chosen["id"], signal["signal"], signal["confidence"]),
-        "live_record": live_record(symbol, interval, chosen["params"]["threshold"]),
+        "live_record": live_record(symbol, interval, p.threshold, p.horizon),
         "move": {**signal["move"], "summary": m["move"]["summary"], "live_record": move_record(symbol, interval)},
     }

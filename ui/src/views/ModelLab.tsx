@@ -22,6 +22,7 @@ const DEFAULTS: RunParams = {
   min_confidence: 0,
   cost_bps: 5,
   prune: false,
+  horizon: 1,
   indicators: { rsi: 14, ema_fast: 12, ema_slow: 26, bb: 20, bb_k: 2, vol: 20, context: true, regime: true },
 };
 const FEATURE_NAMES: Record<string, string> = {
@@ -57,9 +58,18 @@ function Form({ params, set }: { params: RunParams; set: (p: RunParams) => void 
         <Setting label="Bars">
           <Segmented size="sm" label="Bar interval" value={params.interval} onChange={(interval) => set({ ...params, interval, threshold: interval === "1d" ? 0.005 : 0.002 })} options={[{ value: "1d", label: "Daily" }, { value: "1h", label: "Hourly" }]} />
         </Setting>
-        <Setting label="Move that counts (%)" hint="Next-bar change beyond this is BUY or SELL; anything smaller is HOLD.">
-          <NumberInput label="Move that counts" value={+(params.threshold * 100).toFixed(2)} min={0.05} max={5} step={0.05} onCommit={(v) => set({ ...params, threshold: v / 100 })} />
+        <Setting label="Call">
+          <Segmented size="sm" label="What the call is about" value={(params.horizon ?? 1) > 1 ? "barrier" : "next"} onChange={(v) => set({ ...params, horizon: v === "barrier" ? 5 : 1 })} options={[{ value: "next", label: "Next bar" }, { value: "barrier", label: "First barrier" }]} />
         </Setting>
+        {(params.horizon ?? 1) > 1 ? (
+          <Setting label="Bars ahead" hint="BUY if the close rises by the barrier before it falls by it within this many bars, SELL the other way, HOLD if it reaches neither. The barrier is the last 20 bars' volatility stretched to this many bars.">
+            <NumberInput label="Bars ahead" value={params.horizon!} min={2} max={20} onCommit={(horizon) => set({ ...params, horizon })} />
+          </Setting>
+        ) : (
+          <Setting label="Move that counts (%)" hint="Next-bar change beyond this is BUY or SELL; anything smaller is HOLD.">
+            <NumberInput label="Move that counts" value={+(params.threshold * 100).toFixed(2)} min={0.05} max={5} step={0.05} onCommit={(v) => set({ ...params, threshold: v / 100 })} />
+          </Setting>
+        )}
       </Group>
       <Group title="Model">
         <Setting label="Kind">
@@ -218,6 +228,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
         <div>
           <h2 className="text-[15px] font-semibold">
             {run.symbol}, {run.interval === "1d" ? "daily" : "hourly"} bars, {run.params.estimator === "random_forest" ? "random forest" : "gradient boosting"}
+            {(run.params.horizon ?? 1) > 1 ? `, first barrier within ${run.params.horizon} bars` : ""}
           </h2>
           <p className="text-ink-2">Run {run.id}, {dateTime(run.created_at)}, tested on {m.rows} bars{m.from ? ` from ${marketDay(m.from)} to ${marketDay(m.to!)}` : ""}</p>
         </div>
@@ -234,7 +245,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
         </p>
         {m.summary.direction && m.summary.direction.n > 0 && (
           <p>
-            <b className="font-semibold">Up or down alone:</b> on days that moved, when it called a direction it was right{" "}
+            <b className="font-semibold">Up or down alone:</b> {(run.params.horizon ?? 1) > 1 ? "when a barrier was reached" : "on days that moved"}, when it called a direction it was right{" "}
             {pct(m.summary.direction.right / m.summary.direction.n)} of {m.summary.direction.n} times
             {m.summary.direction.range ? ` (likely ${pct(m.summary.direction.range[0])} to ${pct(m.summary.direction.range[1])})` : ""}. A coin toss is 50%.
           </p>
@@ -420,7 +431,7 @@ export function ModelLab() {
                   <tr key={r.id} onClick={() => setChosen(r.id)} className={cx("num cursor-pointer border-t border-rule text-right hover:bg-raised [&>td]:px-2 [&>td]:py-1", r.id === shownId && "bg-raised")}>
                     <td className="text-left">{r.id} <span className="text-ink-3">{dateTime(r.created_at)}</span></td>
                     <td className="text-left">{r.params.estimator === "random_forest" ? `Forest, ${r.params.trees} trees, depth ${r.params.max_depth}` : `Boosting, ${r.params.trees} rounds`}{r.params.prune ? ", pruned" : ""}</td>
-                    <td>{pct(r.params.threshold, 2)}</td>
+                    <td>{(r.params.horizon ?? 1) > 1 ? `${r.params.horizon}-bar barrier` : pct(r.params.threshold, 2)}</td>
                     <td>{pct(r.metrics.summary.scores.model.balanced_accuracy)}</td>
                     <td>{points(r.metrics.summary.edge)}</td>
                     <td>{percent(r.metrics.backtest.strategy.total_return, { sign: true, digits: 1 })}</td>
