@@ -563,12 +563,12 @@ def create_app(run_worker=True):
         async def listen():
             try:
                 async for message in ws.iter_json():
-                    if message.get("type") == "watch" and isinstance(message.get("symbol"), str):
+                    if isinstance(message, dict) and message.get("type") == "watch" and isinstance(message.get("symbol"), str):
                         try:
                             worker.watch(market.clean(message["symbol"]))
                         except market.MarketError:
                             pass
-            except WebSocketDisconnect:
+            except (WebSocketDisconnect, ValueError):  # ValueError: a frame that isn't JSON
                 pass
 
         reader = asyncio.create_task(listen())
