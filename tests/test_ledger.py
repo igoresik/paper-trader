@@ -302,6 +302,14 @@ def test_equity_curve_values_holdings_at_each_close():
     assert curve == [100_000, 90_000 + 10 * 1_100]
 
 
+def test_equity_curve_counts_fills_booked_out_of_time_order():
+    acc = account(100_000)
+    buy(acc, 1, 1_000, now=T0 + 200)
+    buy(acc, 2, 1_000, now=T0 + 100)  # a catch-up fill, stamped with its earlier bar
+    curve = ledger.equity_curve(acc, [(T0, T0 + 300)], lambda symbol, day: 1_000)
+    assert curve == [100_000]
+
+
 @pytest.mark.parametrize("cents, text", [(0, "$0.00"), (5, "$0.05"), (123_456_789, "$1,234,567.89"), (-1_050, "-$10.50")])
 def test_money(cents, text):
     assert ledger.money(cents) == text

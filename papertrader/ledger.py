@@ -436,8 +436,9 @@ def equity_curve(account_id, days, close_on):
     """Portfolio value at each day's close: cash then, plus the shares held then at that day's closing price.
     days are (daily bar start, moment of that day's close); close_on(symbol, day) gives cents."""
     acct = account(account_id)
+    # cash_after_cents follows booking order, and a catch-up fill can be booked after a later one, so add up totals
     trades = db.query(
-        "SELECT symbol, side, shares, cash_after_cents, executed_at FROM trades WHERE account_id = ?"
+        "SELECT symbol, side, shares, total_cents, executed_at FROM trades WHERE account_id = ?"
         " ORDER BY executed_at, id",
         (account_id,),
     )
@@ -445,7 +446,8 @@ def equity_curve(account_id, days, close_on):
     for day, closed_at in days:
         while done < len(trades) and trades[done]["executed_at"] <= closed_at:
             t = trades[done]
-            held[t["symbol"]] = held.get(t["symbol"], 0) + (t["shares"] if t["side"] == "BUY" else -t["shares"])
-            cash, done = t["cash_after_cents"], done + 1
+            buy = t["side"] == "BUY"
+            held[t["symbol"]] = held.get(t["symbol"], 0) + (t["shares"] if buy else -t["shares"])
+            cash, done = cash + (-t["total_cents"] if buy else t["total_cents"]), done + 1
         values.append(cash + sum(n * (close_on(symbol, day) or 0) for symbol, n in held.items() if n))
     return values
