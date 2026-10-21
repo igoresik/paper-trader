@@ -3,7 +3,7 @@ import { CircleHelp, LoaderCircle } from "lucide-react";
 
 import { useDesk } from "../desk";
 import { api, type SignalReport } from "../lib/api";
-import { marketDay, percent } from "../lib/format";
+import { edgeRange, marketDay, percent } from "../lib/format";
 import { cx, Tip } from "./ui";
 
 const tone = { BUY: "text-up", SELL: "text-down", HOLD: "text-ink" } as const;
@@ -35,9 +35,10 @@ function Probabilities({ s }: { s: SignalReport }) {
 }
 
 function verdictLine(s: SignalReport) {
-  const { scores, verdict } = s.model.summary;
+  const { scores, verdict, edge_range, tries } = s.model.summary;
   const best = Math.max(scores.majority.balanced_accuracy, scores.always_buy.balanced_accuracy, scores.yesterday.balanced_accuracy);
-  return `Out of sample this model is ${verdict}: balanced accuracy ${percent(scores.model.balanced_accuracy, { digits: 1 })} against ${percent(best, { digits: 1 })} for the best simple rule.`;
+  const range = edge_range ? ` (an edge ${edgeRange(edge_range, tries)})` : "";
+  return `Out of sample this model is ${verdict}: balanced accuracy ${percent(scores.model.balanced_accuracy, { digits: 1 })} against ${percent(best, { digits: 1 })} for the best simple rule${range}.`;
 }
 
 export function SignalCard() {
