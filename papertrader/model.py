@@ -291,9 +291,10 @@ def _clear(band, base, horizon=1):
 
 def call(model_id, signal, confidence):
     """Whether a signal at this confidence is a call on direction, judged on its band's out-of-sample calls. BUY and
-    SELL have to get the direction right clearly more than half the time on the days that moved: a BUY is also right
-    more often whenever big moves are likely, either way. HOLD never is: how big the move will be is the move
-    reading's job, and two answers to that question could only contradict each other."""
+    SELL have to get the direction right on the days that moved clearly more than half the time, and more often than
+    that direction came anyway: a BUY is also right more often whenever big moves are likely, either way, and on a
+    symbol that drifts up whatever is said. HOLD never is: how big the move will be is the move reading's job, and two
+    answers to that question could only contradict each other."""
     chosen = run(model_id)
     band = _band(chosen["metrics"].get("track_record", []), signal, confidence)
     base = db.query("SELECT AVG(actual = ?) AS rate FROM predictions WHERE model_id = ?", (signal, model_id))[0]["rate"] or 0.0
@@ -304,7 +305,10 @@ def call(model_id, signal, confidence):
         " AND signal = ? AND actual != 'HOLD' AND confidence >= ? AND (confidence < ? OR ? = 1.0)",
         (model_id, signal, band["from"], band["to"], band["to"]),
     )[0]
-    return {"band": band, "base_rate": base, "moved": moved, "clear": _clear(moved, 0.5, Params.load(chosen["params"]).horizon)}
+    drift = db.query("SELECT AVG(actual = ?) AS rate FROM predictions WHERE model_id = ? AND actual != 'HOLD'",
+                     (signal, model_id))[0]["rate"] or 0.0
+    return {"band": band, "base_rate": base, "moved": {**moved, "base_rate": drift},
+            "clear": _clear(moved, max(0.5, drift), Params.load(chosen["params"]).horizon)}
 
 
 def move_call(chosen, p_big):

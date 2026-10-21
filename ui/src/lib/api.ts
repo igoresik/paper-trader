@@ -139,8 +139,9 @@ export interface SignalReport {
   band: Band | null;
   /** how often this outcome happened anyway, out of sample */
   base_rate: number;
-  /** buy and sell: its band's days that moved past the threshold, and how many went its way */
-  moved?: { n: number; right: number } | null;
+  /** buy and sell: its band's days that moved past the threshold, how many went its way, and how often that
+   * direction came on all the days that moved */
+  moved?: { n: number; right: number; base_rate: number } | null;
   /** hold: right clearly more often than base_rate in its band; buy and sell: right on direction clearly over half the time */
   clear: boolean;
   live_record: { n: number; right: number };
