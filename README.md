@@ -54,12 +54,13 @@ Their inputs, all known by the bar's close:
 - the Bollinger %B and band width
 - the 5- and 20-bar moves
 - market context: the VIX, its 5-day change and the 10-year Treasury yield's 5-day change (a daily bar sees that day's close; an hourly bar only the day before's)
+- the volatility regime: the last 5 bars' volatility against the last 60's, and the latest 1- and 5-bar moves measured in volatility
 
 It is never tested on a random split, because that would let the future leak into the past.
 
 **Walk-forward validation.** It trains on the past, tests on the next block of bars, and rolls forward, five times. On the same bars it is compared with three simple rules: always the most common outcome, always BUY, and "same as yesterday".
 
-**Backtest.** Buying on its BUY calls is compared with buying and holding over the same days, after a cost on every trade.
+**Backtest.** Buying on its BUY calls is compared with buying and holding over the same days, after a cost on every trade. A second strategy holds between half and all of the money, more when the model leans up harder than usual, and is compared with holding its average amount all the time: holding 75% of a rising market beats sitting in cash whatever the model says, so only the gap between those two is the model's doing.
 
 **Live record.** The signal you see for each day is stored before the outcome is known, so the live record can't be rewritten by retraining.
 
@@ -76,6 +77,11 @@ On SPY's whole history (a run on 21 October 2026, tested on 7,050 days from Octo
 | Bigger move than usual (balanced accuracy) | 59.5% | 50.6% | +7.1 to +10.1 points |
 
 So the model can't really tell which way SPY goes next: 52% is barely better than tossing a coin, and following its buy calls returned +166% against +696% for buy and hold. What it can tell is whether a bigger move than usual is coming, mostly from the VIX, in every block of years tested, including 2021 to 2026. The app shows exactly that: most days the signal says **No clear edge**, and the move reading carries the part that works. Trained on five years instead of all of SPY's history, the same test swung between "not clearly better" and "better" from one day to the next. It is for learning, not for trading real money.
+
+**Model lab options.** Two more things can be tried, both off by default:
+
+- **First barrier:** instead of the next bar, the call is which the close reaches first within 2 to 20 bars: up by a barrier (BUY), down by it (SELL), or neither (HOLD). The barrier is the last 20 bars' volatility stretched to that many bars. The last training bars before each test block are left out, because their labels look into the block, and since calls a day apart share most of their path, each stretch of that many bars counts once when judging whether a call is worth anything. On SPY, over 5 days, up or down alone was right 55.7% of the time (likely 50.8% to 60.4%) against 52% for the next day. On AAPL and MSFT it stayed near a coin toss.
+- **Drop inputs that don't help:** each training window fits on its first 80%, keeps the inputs whose shuffling hurts its last 20%, and refits with those, so the bars it is tested on never pick them. On SPY, AAPL and MSFT it helped one, hurt one and changed nothing on the third.
 
 ## Run from source
 

@@ -5,6 +5,7 @@
 - New runs also read the volatility regime: the last 5 days' swings against the last 60's, and the latest 1- and 5-day moves measured in those swings.
 - Model lab can drop inputs that don't help. Each training window picks its own, from how much shuffling each one hurts its last fifth, so the bars it's tested on never choose them.
 - The Model lab backtest also sizes by the model's lean, holding half to all of the money, and scores that against holding the same average amount all the time.
+- Model lab can test a first-barrier call: which the close reaches first within 2 to 20 bars, up or down by a volatility-sized barrier, or neither. The bars whose labels look into each test block are left out of its training, and overlapping calls count once per stretch when judging them.
 
 ## 1.1.0 (2026-10-21)
 
