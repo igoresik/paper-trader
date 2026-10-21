@@ -212,8 +212,23 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
 
       <div className="grid gap-2 text-[14px] leading-snug">
         <p>
-          <b className="font-semibold">Direction calls:</b> {m.summary.verdict}. Balanced accuracy {pct(s.model.balanced_accuracy)} against {pct(best)} for the best simple rule ({points(m.summary.edge)} points{m.summary.edge_range ? `, ${edgeRange(m.summary.edge_range, m.summary.tries)}` : ""}), and {pct(m.summary.fold_balanced_accuracy.mean)} &plusmn; {pct(m.summary.fold_balanced_accuracy.std)} across the folds.
+          <b className="font-semibold">Up, flat or down:</b> {m.summary.verdict}. Balanced accuracy {pct(s.model.balanced_accuracy)} against {pct(best)} for the best simple rule ({points(m.summary.edge)} points{m.summary.edge_range ? `, ${edgeRange(m.summary.edge_range, m.summary.tries)}` : ""}), and {pct(m.summary.fold_balanced_accuracy.mean)} &plusmn; {pct(m.summary.fold_balanced_accuracy.std)} across the folds.
         </p>
+        {m.summary.direction && m.summary.direction.n > 0 && (
+          <p>
+            <b className="font-semibold">Up or down alone:</b> on days that moved, when it called a direction it was right{" "}
+            {pct(m.summary.direction.right / m.summary.direction.n)} of {m.summary.direction.n} times
+            {m.summary.direction.range ? ` (likely ${pct(m.summary.direction.range[0])} to ${pct(m.summary.direction.range[1])})` : ""}. A coin toss is 50%.
+          </p>
+        )}
+        {m.move && (
+          <p>
+            <b className="font-semibold">Move size calls:</b> {m.move.summary.verdict}. Calling whether the next bar moves more than usual, balanced accuracy{" "}
+            {pct(m.move.summary.scores.model.balanced_accuracy)} against{" "}
+            {pct(Math.max(m.move.summary.scores.majority.balanced_accuracy, m.move.summary.scores.always_buy.balanced_accuracy, m.move.summary.scores.yesterday.balanced_accuracy))}{" "}
+            for the best simple rule ({points(m.move.summary.edge)} points{m.move.summary.edge_range ? `, ${edgeRange(m.move.summary.edge_range, m.move.summary.tries)}` : ""}).
+          </p>
+        )}
         <p>
           <b className="font-semibold">As a strategy:</b> buying on its calls returned {percent(bt.strategy.total_return, { sign: true, digits: 1 })} against {percent(bt.buy_hold.total_return, { sign: true, digits: 1 })} for buy and hold over the same days, after {run.params.cost_bps} bps per trade.
         </p>

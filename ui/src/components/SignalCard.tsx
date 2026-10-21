@@ -38,7 +38,37 @@ function verdictLine(s: SignalReport) {
   const { scores, verdict, edge_range, tries } = s.model.summary;
   const best = Math.max(scores.majority.balanced_accuracy, scores.always_buy.balanced_accuracy, scores.yesterday.balanced_accuracy);
   const range = edge_range ? ` (an edge ${edgeRange(edge_range, tries)})` : "";
-  return `Out of sample this model is ${verdict}: balanced accuracy ${percent(scores.model.balanced_accuracy, { digits: 1 })} against ${percent(best, { digits: 1 })} for the best simple rule${range}.`;
+  const d = s.model.summary.direction;
+  // the three-way score mostly comes from telling flat days from moves, so say how up against down alone did
+  const alone = d?.n ? ` Up or down alone, on days that moved, it was right ${percent(d.right / d.n, { digits: 0 })} of the time.` : "";
+  return `Out of sample this model is ${verdict}: balanced accuracy ${percent(scores.model.balanced_accuracy, { digits: 1 })} against ${percent(best, { digits: 1 })} for the best simple rule${range}.${alone}`;
+}
+
+/** The reading with real skill: not which way, but whether the next bar moves more than usual */
+function Move({ m, interval }: { m: NonNullable<SignalReport["move"]>; interval: "1d" | "1h" }) {
+  const bigger = m.call === "BIG";
+  const what = bigger ? "Bigger move than usual" : "Quieter than usual";
+  const bar = interval === "1h" ? "hour" : "day";
+  return (
+    <div className="grid gap-1 border-t border-rule pt-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={cx("font-semibold", m.clear ? "text-ink" : "text-ink-2")}>
+          {m.clear ? what : "No clear move call"}
+        </span>
+        <span className="text-ink-2">
+          {!m.clear && <>leans {bigger ? "bigger" : "quieter"}, </>}
+          <span className="num font-medium text-ink">{percent(m.confidence, { digits: 0 })}</span> sure
+        </span>
+      </div>
+      <p className="text-[12px] leading-snug text-ink-2">
+        Usual is a {percent(m.usual, { digits: 1 })} move, the median of the last 60 {bar}s; up or down doesn&rsquo;t matter here.{" "}
+        {m.band
+          ? `When it said ${bigger ? "bigger" : "quieter"} this sure before, it was right ${m.band.right} of ${m.band.n} times (${percent(m.band.right / m.band.n, { digits: 0 })}), against ${percent(m.base_rate, { digits: 0 })} by chance.`
+          : "It hasn't made this call at this confidence out of sample yet."}
+        {m.live_record.n ? ` Live: ${m.live_record.right} of ${m.live_record.n} right.` : ""}
+      </p>
+    </div>
+  );
 }
 
 export function SignalCard() {
@@ -90,11 +120,14 @@ export function SignalCard() {
           )}
           <Probabilities s={s} />
           <p className="text-[12px] leading-snug text-ink-2">
-            {s.band
-              ? `When it said ${s.signal.toLowerCase()} this sure before, it was right ${s.band.right} of ${s.band.n} times (${percent(s.band.right / s.band.n, { digits: 0 })}). `
-              : "It hasn't made this call at this confidence out of sample yet. "}
-            {`A ${s.signal.toLowerCase()} day came ${percent(s.base_rate, { digits: 0 })} of the time anyway.`} {verdictLine(s)}
+            {s.moved?.n
+              ? `When it said ${s.signal.toLowerCase()} this sure before, ${s.moved.n} of those days moved more than ${percent(s.model.threshold, { digits: 1 })}, and it had the direction right on ${s.moved.right} (${percent(s.moved.right / s.moved.n, { digits: 0 })}). A coin toss is 50%.`
+              : s.band
+                ? `When it said ${s.signal.toLowerCase()} this sure before, it was right ${s.band.right} of ${s.band.n} times (${percent(s.band.right / s.band.n, { digits: 0 })}). A ${s.signal.toLowerCase()} day came ${percent(s.base_rate, { digits: 0 })} of the time anyway.`
+                : "It hasn't made this call at this confidence out of sample yet."}{" "}
+            {verdictLine(s)}
           </p>
+          {s.move && <Move m={s.move} interval={interval} />}
           <p className="text-[12px] text-ink-2">
             Live record:{" "}
             {s.live_record.n ? (
