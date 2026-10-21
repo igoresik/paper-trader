@@ -30,8 +30,10 @@ _mutex = None  # held for the life of the process
 def already_open():
     """A second launch brings the open window forward instead of starting another copy."""
     global _mutex
-    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "PaperTrader.SingleInstance")
-    if ctypes.windll.kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
+    # use_last_error saves the error right after the call; a later GetLastError can see a different one
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _mutex = kernel32.CreateMutexW(None, False, "PaperTrader.SingleInstance")
+    if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
         return False
     if window := ctypes.windll.user32.FindWindowW(None, NAME):
         ctypes.windll.user32.ShowWindow(window, 9)  # SW_RESTORE
