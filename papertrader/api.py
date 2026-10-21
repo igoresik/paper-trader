@@ -127,6 +127,7 @@ class RunIn(BaseModel):
     folds: Annotated[int, Field(ge=2, le=10)] = 5
     min_confidence: Annotated[float, Field(ge=0, lt=1)] = 0.0
     cost_bps: Annotated[float, Field(ge=0, le=500)] = 5.0
+    prune: bool = False
     indicators: IndicatorsIn = IndicatorsIn()
 
 

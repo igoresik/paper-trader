@@ -21,6 +21,7 @@ const DEFAULTS: RunParams = {
   folds: 5,
   min_confidence: 0,
   cost_bps: 5,
+  prune: false,
   indicators: { rsi: 14, ema_fast: 12, ema_slow: 26, bb: 20, bb_k: 2, vol: 20, context: true, regime: true },
 };
 const FEATURE_NAMES: Record<string, string> = {
@@ -81,6 +82,11 @@ function Form({ params, set }: { params: RunParams; set: (p: RunParams) => void 
         <Setting label="Min confidence" hint="Below this, the call becomes HOLD.">
           <NumberInput label="Minimum confidence" value={params.min_confidence} min={0} max={0.95} step={0.01} onCommit={(min_confidence) => set({ ...params, min_confidence })} />
         </Setting>
+        <Switch
+          checked={params.prune ?? false}
+          onChange={(prune) => set({ ...params, prune })}
+          label="Drop inputs that don't help, picked inside each training window"
+        />
       </Group>
       <Group title="Indicators">
         <Setting label="RSI period"><NumberInput label="RSI period" value={params.indicators.rsi} min={2} max={100} onCommit={(v) => ind("rsi", v)} /></Setting>
@@ -146,7 +152,7 @@ function Confusion({ m }: { m: number[][] }) {
   );
 }
 
-function Importance({ values }: { values: Record<string, number> }) {
+function Importance({ values, dropped }: { values: Record<string, number>; dropped: string[] }) {
   const rows = Object.entries(values).sort((a, b) => b[1] - a[1]);
   const top = Math.max(0.0001, ...rows.map(([, v]) => v));
   return (
@@ -161,6 +167,7 @@ function Importance({ values }: { values: Record<string, number> }) {
         </div>
       ))}
       <p className="text-[11px] text-ink-3">How much balanced accuracy drops on the last test block when the feature is shuffled. Near zero or below: the model doesn&rsquo;t really use it.</p>
+      {dropped.length > 0 && <p className="text-[11px] text-ink-3">Dropped for the last block: {dropped.map((k) => FEATURE_NAMES[k] ?? k).join(", ")}.</p>}
     </div>
   );
 }
@@ -199,6 +206,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
     { label: "Buy and hold", color: "--ink-3", values: curve.buy_hold },
   ] : []), [curve]);
   const overfit = (m.folds ?? []).some((f) => f.train_balanced_accuracy - f.balanced_accuracy > 0.15);
+  const kept = run.params.prune ? m.folds?.at(-1)?.inputs : undefined;
 
   return (
     <div className="grid gap-6">
@@ -265,7 +273,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
           <table className="w-full text-right text-[12px]">
             <thead className="text-ink-3">
               <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-medium">
-                <th className="text-left">Tested</th><th>Accuracy</th><th>Balanced</th><th>Macro F1</th><th>Majority</th><th>Always buy</th><th>Yesterday</th><th>On its training data</th>
+                <th className="text-left">Tested</th><th>Accuracy</th><th>Balanced</th><th>Macro F1</th><th>Majority</th><th>Always buy</th><th>Yesterday</th><th>On its training data</th>{kept && <th>Inputs kept</th>}
               </tr>
             </thead>
             <tbody>
@@ -279,6 +287,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
                   <td>{pct(f.baselines.always_buy)}</td>
                   <td>{pct(f.baselines.yesterday)}</td>
                   <td className={cx(f.train_balanced_accuracy - f.balanced_accuracy > 0.15 && "text-warn")}>{pct(f.train_balanced_accuracy)}</td>
+                  {kept && <td title={f.inputs!.map((k) => FEATURE_NAMES[k] ?? k).join(", ")}>{f.inputs!.length} of {m.inputs?.length}</td>}
                 </tr>
               ))}
             </tbody>
@@ -296,7 +305,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
         {m.importance && (
           <section>
             <h3 className="mb-2 text-[13px] font-semibold">What it leans on</h3>
-            <Importance values={m.importance} />
+            <Importance values={m.importance} dropped={kept ? (m.inputs ?? []).filter((k) => !kept.includes(k)) : []} />
           </section>
         )}
         {m.track_record && (
@@ -399,7 +408,7 @@ export function ModelLab() {
                 {runs.data.map((r) => (
                   <tr key={r.id} onClick={() => setChosen(r.id)} className={cx("num cursor-pointer border-t border-rule text-right hover:bg-raised [&>td]:px-2 [&>td]:py-1", r.id === shownId && "bg-raised")}>
                     <td className="text-left">{r.id} <span className="text-ink-3">{dateTime(r.created_at)}</span></td>
-                    <td className="text-left">{r.params.estimator === "random_forest" ? `Forest, ${r.params.trees} trees, depth ${r.params.max_depth}` : `Boosting, ${r.params.trees} rounds`}</td>
+                    <td className="text-left">{r.params.estimator === "random_forest" ? `Forest, ${r.params.trees} trees, depth ${r.params.max_depth}` : `Boosting, ${r.params.trees} rounds`}{r.params.prune ? ", pruned" : ""}</td>
                     <td>{pct(r.params.threshold, 2)}</td>
                     <td>{pct(r.metrics.summary.scores.model.balanced_accuracy)}</td>
                     <td>{points(r.metrics.summary.edge)}</td>

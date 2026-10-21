@@ -187,3 +187,19 @@ def test_a_run_from_before_move_readings_is_retested_with_its_own_settings(put_b
     assert signal["model_id"] != old["id"] and model.run(signal["model_id"])["params"] == old["params"]
     assert 0 <= signal["move"]["p_big"] <= 1 and signal["move"]["call"] in ("BIG", "QUIET")
     assert model.move_record("SPY", "1d") == {"n": 0, "right": 0}  # graded once the next bar closes
+
+
+def test_pruning_keeps_the_input_that_carries_the_pattern(put_bars):
+    put_bars("SPY", *planted())
+    metrics = model.validate("SPY", Params(trees=40, max_depth=2, prune=True))["metrics"]
+    assert all("vol_z" in f["inputs"] for f in metrics["folds"])
+    assert any(len(f["inputs"]) < 5 for f in metrics["folds"])  # and drops some of the rest
+    assert metrics["summary"]["verdict"] == "better than the baselines"
+    assert set(metrics["importance"]) == set(metrics["folds"][-1]["inputs"])
+
+
+def test_a_pruned_model_gives_live_signals(put_bars):
+    put_bars("SPY", *planted())
+    model.activate(model.validate("SPY", Params(trees=40, max_depth=2, prune=True))["id"])
+    signal = model.live_signal("SPY", "1d")
+    assert signal["signal"] in ("BUY", "HOLD", "SELL") and 0 <= signal["move"]["p_big"] <= 1

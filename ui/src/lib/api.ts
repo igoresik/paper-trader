@@ -177,6 +177,7 @@ export interface Fold {
   macro_f1: number;
   train_balanced_accuracy: number;
   baselines: { majority: number; always_buy: number; yesterday: number };
+  inputs?: string[];
 }
 
 export interface RunParams {
@@ -190,6 +191,7 @@ export interface RunParams {
   folds: number;
   min_confidence: number;
   cost_bps: number;
+  prune?: boolean;
   indicators: { rsi: number; ema_fast: number; ema_slow: number; bb: number; bb_k: number; vol: number; context?: boolean; regime?: boolean };
 }
 
@@ -215,6 +217,7 @@ export interface Run {
     track_record?: Band[];
     move?: { summary: Summary; track_record: Band[]; base_rate: number };
     importance?: Record<string, number>;
+    inputs?: string[];
     rows?: number;
     from?: number;
     to?: number;
