@@ -42,7 +42,7 @@ def train(args):
     print(f"verdict: {s['verdict']} (edge {s['edge']:+.1%} balanced accuracy, likely {low:+.1%} to {high:+.1%}"
           f" allowing for {s['tries']} run(s) on this data)")
     bt = m["backtest"]
-    for name in ("strategy", "buy_hold"):
+    for name in ("strategy", "sized", "steady", "buy_hold"):
         r = bt[name]
         print(f"{name:>10}: total {r['total_return']:+.1%}, CAGR {r['cagr']:+.1%}, Sharpe {r['sharpe']:.2f}, "
               f"max drawdown {r['max_drawdown']:.1%}")

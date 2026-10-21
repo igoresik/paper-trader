@@ -128,7 +128,8 @@ def walk_forward(X, y, p, progress=None):
         pred, conf = _decide(proba, p.min_confidence)
         actual = yk.iloc[test].to_numpy()
         part = pd.DataFrame(
-            {"pred": pred, "conf": conf, "actual": actual, "majority": int(yk.iloc[train].mode()[0]),
+            {"pred": pred, "conf": conf, "p_buy": proba[:, 2], "p_sell": proba[:, 0], "actual": actual,
+             "majority": int(yk.iloc[train].mode()[0]),
              "always_buy": 1, "yesterday": yesterday.iloc[test].to_numpy().astype(int)},
             index=Xk.index[test],
         )
@@ -209,24 +210,45 @@ def _performance(returns, equity, per_year):
     }
 
 
+def sizes(oos):
+    """Share of the money to hold, from half to all of it, by where the model's lean towards up sits among its
+    earlier out-of-sample leans: its own probabilities bunch together, so their rank spreads the sizes out."""
+    lean = oos["p_buy"] / (oos["p_buy"] + oos["p_sell"])
+    return (0.5 + 0.5 * lean.expanding(60).rank(pct=True)).fillna(0.75).to_numpy()
+
+
+def _returns(weights, r, cost_bps):
+    """Each bar's return holding these shares of the money, paying the cost on every change of holding."""
+    switches = np.abs(np.diff(np.concatenate([[0.0], weights])))
+    returns = weights * r - switches * cost_bps / 10_000
+    return returns, np.cumprod(1 + returns)
+
+
 def backtest(oos, close, p):
-    """Long when the signal says BUY, flat otherwise (no shorting), against buy-and-hold over the same bars."""
+    """Long when the signal says BUY, flat otherwise (no shorting), against buy-and-hold over the same bars. Also
+    sized by the model's lean, against holding its average size all the time: what sizing adds beyond being in."""
     ahead = close.shift(-1) / close - 1
     r = ahead.reindex(oos.index).to_numpy()
     held = (oos["pred"].to_numpy() == 1).astype(float)
-    switches = np.abs(np.diff(np.concatenate([[0.0], held])))
-    strategy = held * r - switches * p.cost_bps / 10_000
-    curve_s, curve_h = np.cumprod(1 + strategy), np.cumprod(1 + r)
+    strategy, curve_s = _returns(held, r, p.cost_bps)
+    curve_h = np.cumprod(1 + r)
+    weights = sizes(oos)
+    sized, curve_z = _returns(weights, r, p.cost_bps)
+    steady, curve_c = _returns(np.full(len(r), weights.mean()), r, p.cost_bps)
     after = pd.Series(close.index[1:], index=close.index[:-1]).reindex(oos.index)  # each return lands on the next bar
     buys = held == 1
     return {
         "strategy": _performance(strategy, curve_s, PER_YEAR[p.interval]),
         "buy_hold": _performance(r, curve_h, PER_YEAR[p.interval]),
+        "sized": _performance(sized, curve_z, PER_YEAR[p.interval]),
+        "steady": _performance(steady, curve_c, PER_YEAR[p.interval]),
         "exposure": float(held.mean()),
+        "sized_exposure": float(weights.mean()),
         "trades": int(((held == 1) & (np.concatenate([[0.0], held[:-1]]) == 0)).sum()),
         "hit_rate": float((r[buys] > 0).mean()) if buys.any() else None,
         "curve": {"t": [int(t) for t in after], "strategy": (100 * curve_s).round(3).tolist(),
-                  "buy_hold": (100 * curve_h).round(3).tolist()},
+                  "buy_hold": (100 * curve_h).round(3).tolist(), "sized": (100 * curve_z).round(3).tolist(),
+                  "steady": (100 * curve_c).round(3).tolist()},
     }
 
 

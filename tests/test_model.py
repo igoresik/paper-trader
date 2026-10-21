@@ -61,13 +61,14 @@ def test_a_planted_pattern_is_found(put_bars):
 
 def test_backtest_charges_costs_on_each_change_of_position():
     close = pd.Series([100.0, 110.0, 121.0, 133.1, 146.41], index=[0, 1, 2, 3, 4])
-    oos = pd.DataFrame({"pred": [1, 1, 1, 1]}, index=[0, 1, 2, 3])
+    oos = pd.DataFrame({"pred": [1, 1, 1, 1], "p_buy": 0.4, "p_sell": 0.3}, index=[0, 1, 2, 3])
     free = model.backtest(oos, close, Params(cost_bps=0))
     assert free["strategy"]["total_return"] == pytest.approx(1.1**4 - 1)
     assert free["buy_hold"]["total_return"] == pytest.approx(1.1**4 - 1)
     costly = model.backtest(oos, close, Params(cost_bps=100))  # one entry at 1%
     assert costly["strategy"]["total_return"] == pytest.approx(1.09 * 1.1**3 - 1)
-    flip = model.backtest(pd.DataFrame({"pred": [1, 0, 1, 0]}, index=[0, 1, 2, 3]), close, Params(cost_bps=0))
+    flip = model.backtest(pd.DataFrame({"pred": [1, 0, 1, 0], "p_buy": 0.4, "p_sell": 0.3}, index=[0, 1, 2, 3]),
+                          close, Params(cost_bps=0))
     assert (flip["trades"], flip["exposure"]) == (2, 0.5)
     assert flip["curve"]["t"] == [1, 2, 3, 4]  # each return lands on the bar it was earned by
 
@@ -203,3 +204,21 @@ def test_a_pruned_model_gives_live_signals(put_bars):
     model.activate(model.validate("SPY", Params(trees=40, max_depth=2, prune=True))["id"])
     signal = model.live_signal("SPY", "1d")
     assert signal["signal"] in ("BUY", "HOLD", "SELL") and 0 <= signal["move"]["p_big"] <= 1
+
+
+def test_sizes_spread_the_lean_from_half_to_all_of_the_money():
+    lean = np.linspace(0.45, 0.55, 300)  # the model's own probabilities bunch together
+    oos = pd.DataFrame({"p_buy": lean, "p_sell": 1 - lean})
+    sizes = model.sizes(oos)
+    assert (sizes[:59] == 0.75).all()  # too few earlier leans to rank against
+    assert sizes[-1] == 1.0 and sizes.min() >= 0.5  # always the highest lean so far: all in
+
+
+def test_sizing_is_scored_against_holding_its_average_size_all_the_time():
+    close = pd.Series(100 * np.cumprod(1 + np.tile([0.01, -0.01], 100)), index=range(200))  # falls after even bars, rises after odd
+    oos = pd.DataFrame({"pred": 1, "p_buy": np.tile([0.4, 0.6], 100)[:199], "p_sell": 0.3}, index=range(199))
+    bt = model.backtest(oos, close, Params(cost_bps=0))
+    assert bt["sized_exposure"] == pytest.approx(model.sizes(oos).mean())
+    # more in before up days, less before down days: sizing earns what holding steady can't
+    assert bt["sized"]["total_return"] > bt["steady"]["total_return"]
+    assert len(bt["curve"]["sized"]) == len(bt["curve"]["steady"]) == 199
