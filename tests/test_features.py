@@ -65,3 +65,14 @@ def test_build_fills_the_feature_store(monkeypatch):
     assert len(stored) == 60
     assert stored[0]["rsi"] is None  # warming up
     assert all(stored[-1][name] is not None for name in features.COLUMNS)
+
+
+def test_market_context_adds_momentum_and_the_columns_it_is_given():
+    close, volume = random_walk(60)
+    plain = features.indicators(close, volume, Params())
+    assert list(plain.columns) == features.COLUMNS  # runs from before context stay as they were
+    context = pd.DataFrame({"vix": 20.0, "vix_change": 0.1, "yield_change": -0.05}, index=close.index)
+    table = features.indicators(close, volume, Params(context=True), context)
+    assert table["ret_5"].iloc[10] == pytest.approx(close.iloc[10] / close.iloc[5] - 1)
+    assert {"vix", "vix_change", "yield_change"} <= set(table.columns)
+    assert "vix" not in features.indicators(close, volume, Params(context=True), None).columns

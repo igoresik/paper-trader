@@ -18,6 +18,7 @@ class Params:
     bb: int = 20
     bb_k: float = 2.0
     vol: int = 20
+    context: bool = False  # momentum plus the VIX and the yield; runs from before it existed load without it
 
 
 def wilder(x, n):
@@ -49,8 +50,9 @@ def macd(close, fast, slow, signal):
     return line, trigger, line - trigger
 
 
-def indicators(close, volume, p=Params()):
-    """Feature table for these closes and volumes (float Series on one index)."""
+def indicators(close, volume, p=Params(), context=None):
+    """Feature table for these closes and volumes (float Series on one index). With p.context it adds 5- and 20-bar
+    momentum, and the market context columns when context (lined up with the bars, see market.context) is given."""
     mid, band = bollinger(close, p.bb, p.bb_k)
     # rolling, not whole-history, mean and std: those would leak later volume into earlier rows
     vol_z = (volume - volume.rolling(p.vol).mean()) / volume.rolling(p.vol).std(ddof=0)
@@ -61,6 +63,10 @@ def indicators(close, volume, p=Params()):
         "pct_b": (close - mid + band) / (2 * band),
         "bb_width": 2 * band / mid,
     })
+    if p.context:
+        table = table.assign(ret_5=close.pct_change(5, fill_method=None), ret_20=close.pct_change(20, fill_method=None))
+        if context is not None:
+            table = table.join(context)
     return table.replace([np.inf, -np.inf], np.nan)
 
 

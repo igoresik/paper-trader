@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LineChart } from "../components/LineChart";
-import { Button, cx, Empty, NumberInput, Segmented, Select } from "../components/ui";
+import { Button, cx, Empty, NumberInput, Segmented, Select, Switch } from "../components/ui";
 import { useDesk } from "../desk";
 import { api, type Band, type Run, type RunParams } from "../lib/api";
 import { dateTime, edgeRange, marketDay, percent, points } from "../lib/format";
@@ -21,9 +21,12 @@ const DEFAULTS: RunParams = {
   folds: 5,
   min_confidence: 0,
   cost_bps: 5,
-  indicators: { rsi: 14, ema_fast: 12, ema_slow: 26, bb: 20, bb_k: 2, vol: 20 },
+  indicators: { rsi: 14, ema_fast: 12, ema_slow: 26, bb: 20, bb_k: 2, vol: 20, context: true },
 };
-const FEATURE_NAMES: Record<string, string> = { rsi: "RSI", ema_spread: "EMA gap", vol_z: "Volume z-score", pct_b: "Bollinger %B", bb_width: "Band width" };
+const FEATURE_NAMES: Record<string, string> = {
+  rsi: "RSI", ema_spread: "EMA gap", vol_z: "Volume z-score", pct_b: "Bollinger %B", bb_width: "Band width",
+  ret_5: "5-day move", ret_20: "20-day move", vix: "VIX", vix_change: "VIX, 5-day change", yield_change: "Yield, 5-day change",
+};
 const pct = (v: number, digits = 1) => percent(v, { digits });
 
 function Setting({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -93,6 +96,11 @@ function Form({ params, set }: { params: RunParams; set: (p: RunParams) => void 
           </span>
         </Setting>
         <Setting label="Volume window"><NumberInput label="Volume window" value={params.indicators.vol} min={2} max={200} onCommit={(v) => ind("vol", v)} /></Setting>
+        <Switch
+          checked={params.indicators.context ?? false}
+          onChange={(context) => set({ ...params, indicators: { ...params.indicators, context } })}
+          label="Market context: VIX, 10-year yield, 5- and 20-day moves"
+        />
       </Group>
       <Group title="Test">
         <Setting label="Walk-forward folds"><NumberInput label="Folds" value={params.folds} min={2} max={10} onCommit={(folds) => set({ ...params, folds })} /></Setting>

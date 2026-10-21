@@ -106,6 +106,7 @@ class IndicatorsIn(BaseModel):
     bb: Annotated[int, Field(ge=2, le=200)] = 20
     bb_k: Annotated[float, Field(gt=0, le=5)] = 2.0
     vol: Annotated[int, Field(ge=2, le=200)] = 20
+    context: bool = True
 
     @model_validator(mode="after")
     def fast_below_slow(self):

@@ -49,7 +49,8 @@ class Params:
 
 
 def defaults(interval):
-    return Params(interval=interval, threshold=0.005 if interval == "1d" else 0.002)
+    return Params(interval=interval, threshold=0.005 if interval == "1d" else 0.002,
+                  indicators=features.Params(context=True))
 
 
 def _estimator(p):
@@ -79,7 +80,9 @@ def _decide(proba, min_confidence):
 
 def dataset(symbol, p):
     bars = market.frame(symbol, p.interval)
-    return bars, features.indicators(bars["close"], bars["volume"], p.indicators), features.labels(bars["close"], p.threshold)
+    context = market.context(bars.index, p.interval) if p.indicators.context else None
+    X = features.indicators(bars["close"], bars["volume"], p.indicators, context)
+    return bars, X, features.labels(bars["close"], p.threshold)
 
 
 def _scores(actual, pred):
@@ -242,7 +245,7 @@ def validate(symbol, p, progress=None):
         "confusion": confusion_matrix(oos["actual"], oos["pred"], labels=CLASSES).tolist(),  # rows: actual SELL, HOLD, BUY
         "backtest": backtest(oos, bars["close"], p),
         "track_record": track_record(oos),
-        "importance": dict(zip(features.COLUMNS, importance.round(4).tolist())),
+        "importance": dict(zip(last_X.columns, importance.round(4).tolist())),
         "rows": len(oos), "from": int(oos.index[0]), "to": int(oos.index[-1]),
     }
     with db.tx() as conn:
