@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -103,3 +104,36 @@ def test_frame_gives_dollars_by_bar_start(monkeypatch):
     bars = market.frame("SPY", "1d")
     assert bars["close"].tolist() == [100.5, 101.25]
     assert bars.index[0] == ny(2026, 10, 13)
+
+
+def test_market_context_is_lined_up_without_looking_ahead(monkeypatch):
+    days = ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07"]
+    frames = {"^VIX": daily(days, [10.0 + i for i in range(8)]), "^TNX": daily(days, [4.0 + i / 10 for i in range(8)])}
+    monkeypatch.setattr(market, "_ticker", lambda symbol: FakeTicker(frames[symbol], {}))
+    market.refresh_context(now=ny(2026, 10, 8, 12))
+    starts = [ny(2026, 9, 28), ny(2026, 10, 7)]
+    by_day = market.context(starts, "1d")
+    assert list(by_day["vix"]) == [10.0, 17.0]  # a daily bar sees that day's close
+    assert by_day["yield_change"].iloc[1] == pytest.approx(0.5)  # 4.7% against 4.2% five days before
+    by_hour = market.context([ny(2026, 10, 7, 10), ny(2026, 9, 28, 10)], "1h")
+    assert by_hour["vix"].iloc[0] == 16.0 and np.isnan(by_hour["vix"].iloc[1])  # an hour only sees the day before
+
+
+def test_context_is_left_out_until_it_has_been_downloaded():
+    assert market.context([ny(2026, 10, 7)], "1d") is None
+
+
+def test_a_series_yahoo_did_not_send_is_left_out(monkeypatch):
+    days = ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05"]
+
+    class TimedOut:
+        def history(self, **kw):
+            raise ConnectionError("timed out")
+
+    def ticker(symbol):
+        return TimedOut() if symbol == "^VIX" else FakeTicker(daily(days, [4.0 + i / 10 for i in range(6)]), {})
+
+    monkeypatch.setattr(market, "_ticker", ticker)
+    with pytest.raises(market.MarketError):
+        market.refresh_context(now=ny(2026, 10, 8, 12))
+    assert list(market.context([ny(2026, 10, 5)], "1d").columns) == ["yield_change"]  # the yield still arrived

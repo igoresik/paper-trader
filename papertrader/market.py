@@ -9,6 +9,7 @@ from datetime import time as clock
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 from yfinance import exceptions as yfe
@@ -208,6 +209,55 @@ def split_factor(symbol):
     """factor(ts): how many shares one share held at ts has become, from the splits since (10 after a 10-for-1)."""
     splits = db.query("SELECT ts, ratio FROM splits WHERE symbol = ?", (symbol,))
     return lambda ts: math.prod(s["ratio"] for s in splits if s["ts"] > ts)
+
+
+# the market's fear gauge and the 10-year Treasury yield: index levels, not tradable, so kept apart from symbols
+CONTEXT = ("^VIX", "^TNX")
+
+
+def refresh_context(now=None):
+    """Download the context series' daily history, stored as bars by New York day start like every daily bar."""
+    now, failed = now or int(time.time()), None
+    for symbol in CONTEXT:
+        try:  # one series failing shouldn't hold the other back
+            frame = _history(_ticker(symbol), symbol, period=PERIODS["1d"], interval="1d", auto_adjust=False)
+        except MarketError as error:
+            failed = error
+            continue
+        # the VIX starts in 1990; older yields aren't needed, and Windows can't place dates before 1970
+        frame = frame[frame.index >= pd.Timestamp("1990-01-01", tz=frame.index.tz)]
+        days = {}
+        for r in frame.itertuples():
+            day = day_start(int(r.Index.timestamp()))
+            if is_complete(day, "1d", now) and not pd.isna(r.Close):
+                days[day] = (symbol, "1d", day, cents(r.Open), cents(r.High), cents(r.Low), cents(r.Close), 0)
+        with db.tx() as conn:
+            conn.execute("DELETE FROM bars WHERE symbol = ? AND interval = '1d'", (symbol,))
+            conn.executemany("INSERT INTO bars VALUES (?, ?, ?, ?, ?, ?, ?, ?)", list(days.values()))
+            conn.execute(
+                "INSERT INTO fetches VALUES (?, '1d', ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at",
+                (symbol, now),
+            )
+    if failed:
+        raise failed
+
+
+def context(index, interval):
+    """The VIX, its 5-day change and the yield's 5-day change as known at each bar: a daily bar sees that day's
+    close, an hourly bar only the day before's. None when the series haven't been downloaded."""
+    rows = db.query("SELECT symbol, ts, close_cents FROM bars WHERE interval = '1d' AND symbol IN (?, ?) ORDER BY ts",
+                    CONTEXT)
+    if not rows:
+        return None
+    daily = pd.DataFrame(rows).pivot(index="ts", columns="symbol", values="close_cents").reindex(columns=list(CONTEXT))
+    daily = daily.ffill() / 100
+    table = pd.DataFrame({"vix": daily["^VIX"], "vix_change": np.log(daily["^VIX"]).diff(5),
+                          "yield_change": daily["^TNX"].diff(5)}).dropna(axis=1, how="all")  # a series not downloaded
+    known = np.array([day_start(int(ts)) - (0 if interval == "1d" else 1) for ts in index])
+    at = np.searchsorted(table.index.to_numpy(), known, side="right") - 1
+    values = table.to_numpy()[np.maximum(at, 0)]
+    values[at < 0] = np.nan
+    return pd.DataFrame(values, index=index, columns=table.columns)
 
 
 def frame(symbol, interval, since=0):
