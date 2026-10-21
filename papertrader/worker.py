@@ -42,6 +42,7 @@ class Worker:
         self.matcher = ThreadPoolExecutor(max_workers=1, thread_name_prefix="match")
         self.ticks = {}  # symbol -> ticks waiting for the matcher
         self._ticks_lock = threading.Lock()
+        self.split_checked = {}  # symbol -> the day its splits were last checked
         self.loop = None
         self._wake = None
         self._tasks = []
@@ -115,6 +116,7 @@ class Worker:
 
     def update_history(self, symbol):
         """Refresh stale history and make sure the latest complete bar has its signal."""
+        self.check_splits(symbol)
         for interval in ("1d", "1h"):
             chosen = model.active(symbol, interval)
             if interval == "1h" and not chosen:
@@ -133,6 +135,28 @@ class Worker:
                     continue
                 features.build(symbol, interval, model.Params.load(model.active(symbol, interval)["params"]).indicators)
                 self.publish({"type": "signal", **signal})
+        self.apply_splits(symbol)  # any a refresh found, here or from a chart
+
+    def check_splits(self, symbol):
+        """Once a session, after the open: a split starts at the open, so held shares and open orders move
+        to the new share count before the day's prices are matched against them."""
+        today = market.day_start(time.time())
+        if self.split_checked.get(symbol) == today or market.session() not in ("regular", "post"):
+            return
+        try:
+            market.check_splits(symbol)
+        except market.MarketError as error:
+            log.warning("split check for %s failed: %s", symbol, error)
+            return
+        self.split_checked[symbol] = today
+        self.apply_splits(symbol)
+
+    def apply_splits(self, symbol):
+        changes = ledger.apply_splits(symbol)
+        for change in changes:
+            self.publish({"type": "split", **change})
+        if changes or db.query("SELECT 1 FROM orders WHERE symbol = ? AND status = 'OPEN'", (symbol,)):
+            self.orders_changed()
 
     # prices
 
@@ -306,6 +330,7 @@ class Worker:
             self.submit(self._match_ticks, symbol, pool=self.matcher)
 
     def _match_ticks(self, symbol):
+        self.check_splits(symbol)
         with self._ticks_lock:
             ticks = self.ticks.pop(symbol, [])
         if ticks:
