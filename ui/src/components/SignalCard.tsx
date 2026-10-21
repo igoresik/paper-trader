@@ -7,6 +7,7 @@ import { marketDay, percent } from "../lib/format";
 import { cx, Tip } from "./ui";
 
 const tone = { BUY: "text-up", SELL: "text-down", HOLD: "text-ink" } as const;
+const word = { BUY: "Buy", SELL: "Sell", HOLD: "Hold" } as const;
 
 function Probabilities({ s }: { s: SignalReport }) {
   // diverging: sell and buy at the ends, hold as the neutral middle
@@ -70,18 +71,28 @@ export function SignalCard() {
       {error && <p className="mt-3 text-ink-2">{error.message}</p>}
       {s && (
         <div className="mt-2 grid gap-3">
-          <div className="flex items-baseline justify-between">
-            <span className={cx("text-2xl font-semibold", tone[s.signal])}>{s.signal === "BUY" ? "Buy" : s.signal === "SELL" ? "Sell" : "Hold"}</span>
-            <span className="text-ink-2">
-              <span className="num font-medium text-ink">{percent(s.confidence, { digits: 0 })}</span> sure, after {marketDay(s.ts)}
-            </span>
-          </div>
+          {s.clear ? (
+            <div className="flex items-baseline justify-between">
+              <span className={cx("text-2xl font-semibold", tone[s.signal])}>{word[s.signal]}</span>
+              <span className="text-ink-2">
+                <span className="num font-medium text-ink">{percent(s.confidence, { digits: 0 })}</span> sure, after {marketDay(s.ts)}
+              </span>
+            </div>
+          ) : (
+            <div>
+              <span className="text-xl font-semibold text-ink-2">No clear edge</span>
+              <p className="text-ink-2">
+                Leans <span className={cx("font-medium", tone[s.signal])}>{word[s.signal].toLowerCase()}</span>,{" "}
+                <span className="num font-medium text-ink">{percent(s.confidence, { digits: 0 })}</span> sure, after {marketDay(s.ts)}
+              </p>
+            </div>
+          )}
           <Probabilities s={s} />
           <p className="text-[12px] leading-snug text-ink-2">
             {s.band
-              ? `When it said ${s.signal.toLowerCase()} this sure before, it was right ${s.band.right} of ${s.band.n} times (${percent(s.band.right / s.band.n, { digits: 0 })}).`
-              : "It hasn't made this call at this confidence out of sample yet."}{" "}
-            {verdictLine(s)}
+              ? `When it said ${s.signal.toLowerCase()} this sure before, it was right ${s.band.right} of ${s.band.n} times (${percent(s.band.right / s.band.n, { digits: 0 })}). `
+              : "It hasn't made this call at this confidence out of sample yet. "}
+            {`A ${s.signal.toLowerCase()} day came ${percent(s.base_rate, { digits: 0 })} of the time anyway.`} {verdictLine(s)}
           </p>
           <p className="text-[12px] text-ink-2">
             Live record:{" "}

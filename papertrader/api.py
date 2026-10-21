@@ -476,8 +476,9 @@ def create_app(run_worker=True):
     @app.get("/watchlist", tags=["market"])
     def watchlist():
         items = db.query("SELECT w.symbol, s.name, s.kind FROM watchlist w JOIN symbols s USING (symbol) ORDER BY w.position")
-        latest = {r["symbol"]: r for r in db.query(
-            "SELECT symbol, signal, confidence, ts FROM signals s WHERE interval = '1d'"
+        latest = {r["symbol"]: {**r, "clear": model.call(r["model_id"], r["signal"], r["confidence"])["clear"]}
+                  for r in db.query(
+            "SELECT symbol, signal, confidence, ts, model_id FROM signals s WHERE interval = '1d'"
             " AND ts = (SELECT MAX(ts) FROM signals WHERE symbol = s.symbol AND interval = '1d')")}
         return [{**item, "price_cents": worker.price(item["symbol"]), "prev_close_cents": worker.prev_close(item["symbol"]),
                  "quote": worker.quotes.get(item["symbol"]), "signal": latest.get(item["symbol"])} for item in items]

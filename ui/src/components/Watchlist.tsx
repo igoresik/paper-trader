@@ -133,11 +133,19 @@ function Row({ item, selected, onSelect, onRemove }: { item: WatchItem; selected
             {arrow(change)} {percent(change, { sign: true })}
           </span>
         </span>
-        <Tip text={call ? `Model says ${call.signal.toLowerCase()} for the next day (${percent(call.confidence, { digits: 0 })} sure)` : "The model is training"}>
+        <Tip
+          text={
+            !call
+              ? "The model is training"
+              : call.clear
+                ? `Model says ${call.signal.toLowerCase()} for the next day (${percent(call.confidence, { digits: 0 })} sure)`
+                : `No clear edge: the model leans ${call.signal.toLowerCase()} (${percent(call.confidence, { digits: 0 })} sure), but calls like this haven't beaten chance`
+          }
+        >
           <span
             className={cx(
               "grid size-6 place-items-center rounded text-[11px] font-semibold",
-              !call ? "text-ink-3" : call.signal === "BUY" ? "bg-up/15 text-up" : call.signal === "SELL" ? "bg-down/15 text-down" : "bg-rule/60 text-ink-2",
+              !call || !call.clear ? "border border-rule text-ink-3" : call.signal === "BUY" ? "bg-up/15 text-up" : call.signal === "SELL" ? "bg-down/15 text-down" : "bg-rule/60 text-ink-2",
             )}
           >
             {call ? call.signal[0] : <LoaderCircle className="size-3.5 animate-spin" />}

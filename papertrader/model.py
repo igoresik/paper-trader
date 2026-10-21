@@ -21,6 +21,7 @@ PER_YEAR = {"1d": 252, "1h": 252 * 7}
 MIN_ROWS = 250
 # balanced-accuracy margins over the best baseline: within NOISE is no edge, past CLEAR is a real one
 NOISE, CLEAR = 0.02, 0.05
+MIN_CALLS = 30  # fewer out-of-sample calls than this in a band prove too little either way
 
 
 class ModelError(Exception):
@@ -189,6 +190,21 @@ def _band(record, signal, confidence):
                  and (confidence < b["to"] or b["to"] == 1.0)), None)
 
 
+def _wilson_low(right, n, z=1.96):
+    """Lower end of the 95% range for a hit rate of right/n, which stays honest for small n."""
+    rate = right / n
+    return (rate + z * z / (2 * n) - z * np.sqrt(rate * (1 - rate) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+
+
+def call(model_id, signal, confidence):
+    """Whether a signal at this confidence has an edge: in its band, out of sample, it must have been right
+    clearly more often than that outcome happens anyway. A 3-way guess that's 36% sure usually hasn't."""
+    band = _band(run(model_id)["metrics"].get("track_record", []), signal, confidence)
+    base = db.query("SELECT AVG(actual = ?) AS rate FROM predictions WHERE model_id = ?", (signal, model_id))[0]["rate"] or 0.0
+    clear = bool(band and band["n"] >= MIN_CALLS and _wilson_low(band["right"], band["n"]) > base)
+    return {"band": band, "base_rate": base, "clear": clear}
+
+
 def validate(symbol, p, progress=None):
     """Run walk-forward validation and store the run (not active yet). Returns the run."""
     bars, X, y = dataset(symbol, p)
@@ -319,6 +335,6 @@ def report(symbol, interval):
         **signal,
         "model": {"id": chosen["id"], "created_at": chosen["created_at"], "estimator": chosen["params"]["estimator"],
                   "threshold": chosen["params"]["threshold"], "summary": m["summary"]},
-        "band": _band(m["track_record"], signal["signal"], signal["confidence"]),
+        **call(chosen["id"], signal["signal"], signal["confidence"]),
         "live_record": live_record(symbol, interval, chosen["params"]["threshold"]),
     }
