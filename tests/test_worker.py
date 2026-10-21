@@ -1,3 +1,7 @@
+import threading
+import time
+
+from papertrader import ledger
 from papertrader.worker import Worker
 
 OPEN = 1_792_416_600  # Monday 2026-10-19, 09:30 New York
@@ -31,3 +35,48 @@ def test_ticks_add_the_volume_traded_since_the_last_one():
         worker._tick({"id": "SPY", "price": 770.0, "time": str((OPEN + second) * 1000), "market_hours": 1, "day_volume": str(total)})
     minutes = worker.minutes["SPY"]
     assert (minutes[OPEN][4], minutes[OPEN + 60][4]) == (250, 50)  # the first tick only sets the starting total
+
+
+def tick(worker, price, second=0):
+    worker._tick({"id": "AAPL", "price": price, "time": str((OPEN + second) * 1000), "market_hours": 1})
+
+
+def test_fills_dont_wait_behind_slow_background_work():
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.place_order(acc, "AAPL", "BUY", "LIMIT", 1, limit_cents=10_000, now=OPEN - 60)
+    worker = Worker(lambda event: None)
+    worker.orders_changed()
+    busy = threading.Event()
+    for _ in range(2):
+        worker.pool.submit(busy.wait, 10)  # history refresh or model training holding both threads
+    try:
+        tick(worker, 99.0)
+        assert wait_for(lambda: ledger.orders(acc, "FILLED"))
+    finally:
+        busy.set()
+
+
+def test_ticks_that_arrive_mid_match_are_matched_together_next():
+    worker, runs, release = Worker(lambda event: None), [], threading.Event()
+    worker.with_orders = {"AAPL"}
+
+    def match(symbol, ticks):
+        runs.append(len(ticks))
+        release.wait(10)
+
+    worker.match = match
+    tick(worker, 150.0)
+    assert wait_for(lambda: runs == [1])
+    for second in (1, 2, 3):
+        tick(worker, 150.0, second)
+    release.set()
+    assert wait_for(lambda: runs == [1, 3])
+
+
+def wait_for(check, seconds=5):
+    end = time.time() + seconds
+    while time.time() < end:
+        if check():
+            return True
+        time.sleep(0.02)
+    return False

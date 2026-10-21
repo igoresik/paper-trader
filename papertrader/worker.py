@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -37,6 +38,10 @@ class Worker:
         self.watched = set()
         self.with_orders = set()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="work")
+        # fills get their own thread, so they never queue behind history downloads or model training
+        self.matcher = ThreadPoolExecutor(max_workers=1, thread_name_prefix="match")
+        self.ticks = {}  # symbol -> ticks waiting for the matcher
+        self._ticks_lock = threading.Lock()
         self.loop = None
         self._wake = None
         self._tasks = []
@@ -52,6 +57,7 @@ class Worker:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self.pool.shutdown(wait=False, cancel_futures=True)
+        self.matcher.shutdown(wait=False, cancel_futures=True)
 
     async def _run(self, fn, *args):
         try:
@@ -59,14 +65,14 @@ class Worker:
         except Exception as error:  # one bad symbol or a dropped connection must not stop the loop
             log.warning("%s failed: %s", fn.__name__, error)
 
-    def submit(self, fn, *args):
+    def submit(self, fn, *args, pool=None):
         """Run blocking work in the background, logging what goes wrong."""
 
         def report(done):
-            if error := done.exception():
+            if not done.cancelled() and (error := done.exception()):
                 log.warning("%s failed: %s", fn.__name__, error)
 
-        self.pool.submit(fn, *args).add_done_callback(report)
+        (pool or self.pool).submit(fn, *args).add_done_callback(report)
 
     def symbols(self):
         rows = db.query(
@@ -284,12 +290,26 @@ class Worker:
                 self.day_volume[symbol] = total
             self._add_minute(symbol, ts, cents, traded)
             if symbol in self.with_orders:
-                self.submit(self.match, symbol, [{"ts": ts, "open": cents, "high": cents, "low": cents, "close": cents}])
+                self._queue_tick(symbol, {"ts": ts, "open": cents, "high": cents, "low": cents, "close": cents})
         else:
             quote.update(ext_price_cents=cents, ext_session=session)
             if quote.get("session") == "regular" and market.session(ts) != "regular":
                 quote["session"] = "closed"
         self.publish({"type": "quote", **quote})
+
+    def _queue_tick(self, symbol, tick):
+        """One match per symbol at a time: ticks that arrive meanwhile are matched together next, so they can't pile up."""
+        with self._ticks_lock:
+            waiting = symbol in self.ticks
+            self.ticks.setdefault(symbol, []).append(tick)
+        if not waiting:
+            self.submit(self._match_ticks, symbol, pool=self.matcher)
+
+    def _match_ticks(self, symbol):
+        with self._ticks_lock:
+            ticks = self.ticks.pop(symbol, [])
+        if ticks:
+            self.match(symbol, ticks)
 
     def _add_minute(self, symbol, ts, cents, volume=0):
         minutes = self.minutes.setdefault(symbol, {})
