@@ -38,7 +38,9 @@ def train(args):
     s = m["summary"]
     for name, score in s["scores"].items():
         print(f"{name:>10}: accuracy {score['accuracy']:.1%}, balanced accuracy {score['balanced_accuracy']:.1%}")
-    print(f"verdict: {s['verdict']} (edge {s['edge']:+.1%} balanced accuracy)")
+    low, high = s["edge_range"]
+    print(f"verdict: {s['verdict']} (edge {s['edge']:+.1%} balanced accuracy, likely {low:+.1%} to {high:+.1%}"
+          f" allowing for {s['tries']} run(s) on this data)")
     bt = m["backtest"]
     for name in ("strategy", "buy_hold"):
         r = bt[name]
