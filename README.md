@@ -15,7 +15,8 @@ Good to know:
 - The installer isn't signed, so Windows may say "Windows protected your PC". Choose **More info > Run anyway**.
 - The window is drawn by Microsoft Edge WebView2, which comes with Windows 10 and 11.
 - The first start after installing takes longer (Windows checks the new files); after that it opens in about two seconds.
-- Your data is kept in `%LOCALAPPDATA%\PaperTrader`. Uninstalling (Windows Settings > Apps) leaves it there, so a reinstall keeps your portfolios.
+- Your data is kept in `%LOCALAPPDATA%\PaperTrader`. Uninstalling (Windows Settings > Apps) leaves it there, so a reinstall keeps your portfolios, and a newer version upgrades the data in place.
+- When a new version is out, the top bar links to it. The check is one request to GitHub per start, and it can be switched off in Settings.
 
 ## What you can do
 
@@ -32,7 +33,10 @@ Good to know:
   - Your fills, your average cost and your open orders, drawn on the chart.
   - Every choice is remembered.
 - **Portfolios:** several of them. A reset keeps the old one as a read-only record. Positions show live profit and loss, the equity curve is compared with SPY, and the trade ledger can be paged, filtered and exported to CSV.
+- **Report card:** the honest test the model gets, applied to you: how many sales made money, average win and loss, your biggest drop, what commission and slippage cost you, how often you were in the market, and how SPY and SPY's model did over the same days.
+- **Replay:** trade a symbol's past one day at a time, seeing only the days up to the replay's date. A year takes an afternoon instead of a year, and the report card compares you with buying and holding and with the model's out-of-sample calls for the same days.
 - **Model lab:** change how the model works and test it the honest way, then pick which test drives the live signal.
+- **Stock splits:** held shares, open orders and the model's record move to the new share count. A reverse split that leaves part of a share pays that part out in cash.
 - **Look:** dark or light, or follow Windows. Up and down colours can be green/red, red/green, or blue/orange for colour-blind eyes. Direction always comes with an arrow and a sign as well.
 
 ## How the model is tested, and what it shows
@@ -52,15 +56,19 @@ It is never tested on a random split, because that would let the future leak int
 
 **Live record.** The signal you see for each day is stored before the outcome is known, so the live record can't be rewritten by retraining.
 
-On five years of SPY (October 2026), the honest answer was:
+**Could it be luck?** The edge over the best simple rule gets a likely range, from resampling the tested days in blocks of 20 (neighbouring days move together, so single days would overstate the evidence). Every Model lab run on the same data is another chance to look good by luck, so the range widens with each one. The verdict follows the range: better only when the whole range is above zero.
+
+**Is this call worth anything?** A signal only shows as Buy or Sell when calls like it, at that confidence and out of sample, were right clearly more often than that kind of day happens anyway. Otherwise the card says **No clear edge** and shows which way the model leans.
+
+On five years of SPY (21 October 2026), the honest answer was:
 
 | | Balanced accuracy | Return over the tested years |
 |---|---|---|
-| Random forest | 39.4% | +14.3% |
-| Best simple rule | 36.6% | |
-| Buy and hold | | +108.3% |
+| Random forest | 37.3% | -1.3% |
+| Best simple rule | 36.5% | |
+| Buy and hold | | +111.1% |
 
-The forest was slightly better than the simple rules at calling direction, but following it earned far less than buying and holding. Gradient boosting showed no edge at all and memorised its training data. The app shows these numbers next to every signal. It is for learning, not for trading real money.
+That's an edge of +0.8 points, likely between -3.3 and +5.4: not clearly better than the simple rules, and following it earned far less than buying and holding. A day earlier, the same test had said 39.4% and +14.3%. Small edges like this move with one more day of data, which is why the app shows the range. Gradient boosting showed no edge at all and memorised its training data. It is for learning, not for trading real money.
 
 ## Run from source
 
@@ -99,12 +107,14 @@ The API is documented at http://127.0.0.1:8000/docs.
 | `papertrader/market.py` | Yahoo Finance history in SQLite, symbol checks, New York trading hours |
 | `papertrader/features.py` | RSI, EMA spread, volume z-score, Bollinger, MACD, labels; the feature store |
 | `papertrader/model.py` | Walk-forward validation, baselines, backtest, live signals |
-| `papertrader/worker.py` | Live price stream, order matching on every tick, catch-up after gaps |
+| `papertrader/worker.py` | Live price stream, order matching on its own thread, catch-up after gaps, split checks |
+| `papertrader/replay.py` | Replays: a portfolio with its own clock, stepped through history a day at a time |
+| `papertrader/updates.py` | The optional check for a newer release |
 | `papertrader/api.py` | FastAPI routes and the WebSocket for live updates |
 | `papertrader/desktop.py` | The desktop window around the API |
-| `papertrader/schema.sql` | The database |
+| `papertrader/schema.sql`, `papertrader/db.py` | The database, and the numbered upgrade steps that keep installed copies' data |
 | `ui/` | The React app (Vite, TypeScript, Tailwind, Lightweight Charts) |
-| `tests/` | pytest suite (ledger, market data, features, model, API) |
+| `tests/` | pytest suite (ledger, market data, features, model, replay, API) |
 | `PaperTrader.spec`, `installer.iss`, `build.ps1` | The Windows build |
 | `scripts/make_icon.py` | Draws `assets/icon.ico` |
 
@@ -115,14 +125,18 @@ The API is documented at http://127.0.0.1:8000/docs.
 - The `trades` table is the audit log. Database triggers refuse any change or deletion.
 - A position keeps its total cost, not a rounded average, so selling part of it never leaves a few cents behind.
 - Bars are split-adjusted, as brokers chart them, and are downloaded again when stale, because Yahoo re-adjusts old bars after a split. Only complete bars are stored.
+- Splits are kept with the day they took effect, so old fills and old signals can be put on today's share count.
+- A newer version upgrades the database one numbered step at a time, so an installed copy keeps its data.
+- When Yahoo Finance stops answering, a banner says so. Waiting orders stay in place and fill once prices come back.
 
 ## Safety
 
 - **Only this computer can reach the app.** Its server answers on 127.0.0.1 only, on a new port each start.
 - **Websites can't get in through a trick domain.** A website you visit can't reach it by pointing its own domain at your computer: requests addressed to any other host are refused.
-- **Websites can't place orders.** Orders are only accepted as JSON, which browsers don't send across sites without permission, and the app gives none.
+- **Websites can't place orders or change anything.** Orders are only accepted as JSON, which browsers don't send across sites without permission, and the app gives none. Any request that changes something is also refused when it comes from another site's page.
 - **Websites can't listen to the live updates.** The live-update connection checks which page opened it.
 - **Nothing to steal.** There are no passwords, keys or real money in the app, and trained models are never saved as files that could run code when loaded.
+- **What leaves your computer:** requests to Yahoo Finance for prices, and, unless you switch it off, one request to GitHub per start to look for a new version. Neither carries anything about you or your trades.
 
 ## Tests
 
@@ -136,5 +150,9 @@ npm test
 
 - Prices come from Yahoo Finance through [yfinance](https://github.com/ranaroussi/yfinance). Yahoo allows this for personal use, and quotes can be late or missing. The data is never stored in this repository.
 - Charts are drawn with [TradingView Lightweight Charts](https://www.tradingview.com/lightweight-charts/)&trade;, &copy; TradingView, Inc., under the Apache License 2.0.
+
+## License
+
+MIT, see [LICENSE](LICENSE). What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 Educational software. Not financial advice.
