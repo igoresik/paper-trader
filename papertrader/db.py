@@ -114,7 +114,12 @@ def init():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never wait for a writer
-        if conn.execute("PRAGMA user_version").fetchone()[0] == 0:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == 0:
             _run(conn, (ROOT / "schema.sql").read_text(encoding="utf-8"))
+        elif version <= len(UPGRADES):
+            # a copy as it was, in case an upgrade step goes wrong on someone's real data
+            with closing(sqlite3.connect(DB_PATH.with_name(f"{DB_PATH.stem}-v{version}-backup.db"))) as copy:
+                conn.backup(copy)
         for script in UPGRADES[conn.execute("PRAGMA user_version").fetchone()[0] - 1:]:
             _run(conn, script)
