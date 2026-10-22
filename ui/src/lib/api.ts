@@ -219,11 +219,15 @@ export interface Run {
       /** sized by the model's lean, and holding its average size all the time; runs from before 1.2 lack them */
       sized?: Performance;
       steady?: Performance;
+      /** sized by the move reading, less when a big move looks likelier, and its average size; runs from before 1.4 lack them */
+      calm?: Performance;
+      calm_steady?: Performance;
       exposure: number;
       sized_exposure?: number;
+      calm_exposure?: number;
       trades: number;
       hit_rate: number | null;
-      curve?: { t: number[]; strategy: number[]; buy_hold: number[]; sized?: number[]; steady?: number[] };
+      curve?: { t: number[]; strategy: number[]; buy_hold: number[]; sized?: number[]; steady?: number[]; calm?: number[]; calm_steady?: number[] };
     };
     track_record?: Band[];
     move?: { summary: Summary; track_record: Band[]; base_rate: number };

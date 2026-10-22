@@ -222,6 +222,12 @@ def sizes(oos):
     return (0.5 + 0.5 * lean.expanding(60).rank(pct=True)).fillna(0.75).to_numpy()
 
 
+def calm_sizes(p_big):
+    """Share of the money to hold, from all of it down to half, by where the move reading's chance of a bigger
+    move than usual sits among its earlier out-of-sample readings: less is held when a big move looks likelier."""
+    return (1 - 0.5 * p_big.expanding(60).rank(pct=True)).fillna(0.75).to_numpy()
+
+
 def _returns(weights, r, cost_bps):
     """Each bar's return holding these shares of the money, paying the cost on every change of holding."""
     switches = np.abs(np.diff(np.concatenate([[0.0], weights])))
@@ -229,9 +235,10 @@ def _returns(weights, r, cost_bps):
     return returns, np.cumprod(1 + returns)
 
 
-def backtest(oos, close, p):
+def backtest(oos, close, p, move_oos=None):
     """Long when the signal says BUY, flat otherwise (no shorting), against buy-and-hold over the same bars. Also
-    sized by the model's lean, against holding its average size all the time: what sizing adds beyond being in."""
+    sized by the model's lean, and by the move reading (calm), each against holding its average size all the time:
+    what sizing adds beyond being in."""
     ahead = close.shift(-1) / close - 1
     r = ahead.reindex(oos.index).to_numpy()
     held = (oos["pred"].to_numpy() == 1).astype(float)
@@ -240,6 +247,15 @@ def backtest(oos, close, p):
     weights = sizes(oos)
     sized, curve_z = _returns(weights, r, p.cost_bps)
     steady, curve_c = _returns(np.full(len(r), weights.mean()), r, p.cost_bps)
+    calm = {}
+    if move_oos is not None:  # the move reading's test blocks can start a few bars off the signal's
+        held_calm = calm_sizes(move_oos["p_buy"].reindex(oos.index))
+        calm_r, curve_q = _returns(held_calm, r, p.cost_bps)
+        calm_steady, curve_qs = _returns(np.full(len(r), held_calm.mean()), r, p.cost_bps)
+        calm = {"calm": _performance(calm_r, curve_q, PER_YEAR[p.interval]),
+                "calm_steady": _performance(calm_steady, curve_qs, PER_YEAR[p.interval]),
+                "calm_exposure": float(held_calm.mean()),
+                "curve": {"calm": (100 * curve_q).round(3).tolist(), "calm_steady": (100 * curve_qs).round(3).tolist()}}
     after = pd.Series(close.index[1:], index=close.index[:-1]).reindex(oos.index)  # each return lands on the next bar
     buys = held == 1
     return {
@@ -247,13 +263,14 @@ def backtest(oos, close, p):
         "buy_hold": _performance(r, curve_h, PER_YEAR[p.interval]),
         "sized": _performance(sized, curve_z, PER_YEAR[p.interval]),
         "steady": _performance(steady, curve_c, PER_YEAR[p.interval]),
+        **{k: v for k, v in calm.items() if k != "curve"},
         "exposure": float(held.mean()),
         "sized_exposure": float(weights.mean()),
         "trades": int(((held == 1) & (np.concatenate([[0.0], held[:-1]]) == 0)).sum()),
         "hit_rate": float((r[buys] > 0).mean()) if buys.any() else None,
         "curve": {"t": [int(t) for t in after], "strategy": (100 * curve_s).round(3).tolist(),
                   "buy_hold": (100 * curve_h).round(3).tolist(), "sized": (100 * curve_z).round(3).tolist(),
-                  "steady": (100 * curve_c).round(3).tolist()},
+                  "steady": (100 * curve_c).round(3).tolist(), **calm.get("curve", {})},
     }
 
 
@@ -339,7 +356,7 @@ def validate(symbol, p, progress=None):
         "summary": summarize(folds, oos, tries, p.horizon),
         "folds": folds,
         "confusion": confusion_matrix(oos["actual"], oos["pred"], labels=CLASSES).tolist(),  # rows: actual SELL, HOLD, BUY
-        "backtest": backtest(oos, bars["close"], p),
+        "backtest": backtest(oos, bars["close"], p, move_oos),
         "track_record": track_record(oos),
         "importance": dict(zip(last_X.columns, importance.round(4).tolist())),
         "inputs": list(X.columns),  # every input on offer; with pruning each fold lists the ones it kept
