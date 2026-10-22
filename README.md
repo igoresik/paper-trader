@@ -147,6 +147,31 @@ The API is documented at http://127.0.0.1:8000/docs.
 
 `docker compose up --build` runs the same app without the desktop window at http://localhost:8000. It only listens on this computer, because the app has no login. Data lives in the `paper-data` volume.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["<b>React UI</b><br/>desktop window or any browser"]
+    YF(["Yahoo Finance"])
+    subgraph proc ["one Python process"]
+        API["<b>FastAPI</b><br/>REST + /ws live feed"]
+        W["<b>Worker</b><br/>price stream, order matching"]
+        ML["<b>ML engine</b><br/>scikit-learn, walk-forward"]
+    end
+    DB[("<b>SQLite ledger</b><br/>BEGIN IMMEDIATE, WAL")]
+
+    UI <-->|"HTTP + WebSocket"| API
+    API -->|"orders, portfolios"| DB
+    API -->|"Model lab runs"| ML
+    YF -->|"live prices, history"| W
+    W -->|"fills, bars, splits"| DB
+    W -->|"new bar"| ML
+    ML -->|"features, runs, signals"| DB
+    W -.->|"ticks, fills, signals"| API
+```
+
+A price from Yahoo's stream reaches the worker, which fills any waiting order it triggers, each fill in one transaction, and pushes the quote and the fill to every open window over `/ws`. The UI never talks to Yahoo or the database itself.
+
 ## Layout
 
 | Path | What it does |
