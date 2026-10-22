@@ -1,5 +1,15 @@
 # Paper Trader
 
+[![CI](https://github.com/igoresik/paper-trader/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/igoresik/paper-trader/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/igoresik/paper-trader?label=release)](https://github.com/igoresik/paper-trader/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
+
 A Windows desktop app for practising trades with fake money on real US market prices, with a machine-learning signal that shows its own track record, including when it is no better than guessing.
 
 ![The trading desk: watchlist, chart with indicators, order ticket and the model's signal](docs/desk.png)
