@@ -104,9 +104,10 @@ UPGRADES = [
     CREATE TABLE positions_new (
         account_id INTEGER NOT NULL REFERENCES accounts (id),
         symbol TEXT NOT NULL,
-        shares INTEGER NOT NULL CHECK (shares <> 0),
+        shares INTEGER NOT NULL,
         cost_basis_cents INTEGER NOT NULL,
-        PRIMARY KEY (account_id, symbol)
+        PRIMARY KEY (account_id, symbol),
+        CHECK (shares > 0 AND cost_basis_cents >= 0 OR shares < 0 AND cost_basis_cents < 0)
     );
     INSERT INTO positions_new SELECT account_id, symbol, shares, cost_basis_cents FROM positions;
     DROP TABLE positions;
