@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 (2026-10-22)
+
+- Model lab tests a third strategy, **calm before big moves**: hold less when the move reading expects a bigger move than usual, scored against holding the same average amount. The chart switches between the model's calls, lean sizing and calm, each next to its own same-size line.
+
 ## 1.3.1 (2026-10-22)
 
 - The window opens maximized, or, if you last closed it smaller, centered on the screen at a size that fits. It used to open off to the side.
