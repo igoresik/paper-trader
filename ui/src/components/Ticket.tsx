@@ -19,6 +19,9 @@ function estimate(side: Side, n: number, priceCents: number, slip: boolean, s: {
   return { price, fee, total: side === "BUY" ? value + fee : value - fee };
 }
 
+/** Same as the ledger: a short holds 150% of what its sales brought in as collateral (its basis is minus that). */
+const collateral = (basis: number) => Math.max(0, Math.floor((1 - 3 * basis) / 2));
+
 const paperInput =
   "num h-9 w-full rounded-md border border-paper-rule bg-white/80 px-2.5 font-mono text-[13px] text-paper-ink placeholder:text-paper-ink/40 focus:border-buy focus:outline-none";
 
@@ -40,10 +43,23 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
   const live = quote?.session === "regular" && quote.price_cents ? quote.price_cents : null;
   const ref = live ?? quote?.price_cents ?? lastPrice;
   const position = portfolio?.positions.find((p) => p.symbol === symbol);
-  const owned = position?.shares ?? 0;
+  const owned = position?.shares ?? 0; // below zero: short
+  const shorted = Math.max(0, -owned);
+  const basis = position?.cost_basis_cents ?? 0;
+  const shorting = side === "SELL" && owned <= 0;
+  const buyingBack = side === "BUY" && owned < 0;
   const priced = type === "MARKET" ? ref : parseCents(limit);
   const n = mode === "shares" ? (/^\d+$/.test(qty) ? Number(qty) : 0) : priced ? Math.floor((parseCents(amount) ?? 0) / priced) : 0;
   const est = priced && n > 0 ? estimate(side, n, priced, type !== "LIMIT", settings) : null;
+  const marginFor = (k: number) => {
+    const proceeds = estimate("SELL", k, priced ?? 0, type !== "LIMIT", settings).total;
+    return Math.max(0, collateral(basis - proceeds) - collateral(basis) - proceeds);
+  };
+  const margin = shorting && est ? marginFor(n) : 0;
+  // buying back frees that part of the collateral
+  const removed = n >= shorted ? basis : -Math.floor((-basis * n) / shorted);
+  const freed = buyingBack ? collateral(basis) - collateral(basis - removed) : 0;
+  const buyIn = shorting && est ? Math.ceil((10 * collateral(basis - est.total)) / (13 * (shorted + n))) : null;
 
   useEffect(() => {
     if (!preset) return;
@@ -87,9 +103,13 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
   const send = useMutation({
     mutationFn: async () => {
       if (!accountId) throw new ApiError(400, "Open a portfolio first.");
-      if (type === "MARKET") return api.execute(accountId, symbol, side, n);
+      if (type === "MARKET") return api.execute(accountId, symbol, side, n, shorting);
       const price = parseCents(limit)!;
-      return api.placeOrder({ account_id: accountId, symbol, side, type, shares: n, ...(type === "LIMIT" ? { limit_cents: price } : { stop_cents: price }) });
+      return api.placeOrder({
+        account_id: accountId, symbol, side, type, shares: n,
+        ...(type === "LIMIT" ? { limit_cents: price } : { stop_cents: price }),
+        ...(shorting ? { short: true } : {}),
+      });
     },
     onSuccess: (result) => {
       if ("price_cents" in result) markShown(result.id);
@@ -104,17 +124,21 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
     },
   });
 
-  const verb = side === "BUY" ? "Buy" : "Sell";
+  const verb = side === "BUY" ? (buyingBack ? "Buy back" : "Buy") : shorting ? "Sell short" : "Sell";
   const problem =
     n < 1
       ? mode === "amount" ? "That amount doesn't buy a whole share." : "Enter at least 1 share."
       : type !== "MARKET" && !parseCents(limit)
         ? `Enter a ${type === "LIMIT" ? "limit" : "stop"} price.`
-        : side === "SELL" && n > owned
-          ? owned ? `You own ${fmtShares(owned)} ${symbol}.` : `You don't own any ${symbol}.`
-          : side === "BUY" && est && portfolio && est.total > portfolio.buying_power_cents
-            ? `That needs ${money(est.total)}; you have ${money(portfolio.buying_power_cents)} to spend.`
-            : null;
+        : side === "SELL" && owned > 0 && n > owned
+          ? `You own ${fmtShares(owned)} ${symbol}. Sell those before selling short.`
+          : buyingBack && n > shorted
+            ? `You're short ${fmtShares(shorted)} ${symbol}, so you can buy back up to ${fmtShares(shorted)}.`
+            : shorting && portfolio && margin > portfolio.buying_power_cents
+              ? `Selling short needs ${money(margin)} of margin; you have ${money(portfolio.buying_power_cents)} to spend.`
+              : side === "BUY" && est && portfolio && est.total > portfolio.buying_power_cents + freed
+                ? `That needs ${money(est.total)}; you have ${money(portfolio.buying_power_cents + freed)} to spend.`
+                : null;
   const label = `${verb} ${fmtShares(Math.max(n, 0))} ${symbol}${type === "MARKET" ? "" : ` ${type === "LIMIT" ? "limit" : "stop"} ${money(parseCents(limit))}`}`;
 
   const submit = (e: React.FormEvent) => {
@@ -126,8 +150,16 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
 
   const size = (fraction: number) => {
     setMode("shares");
-    if (side === "SELL") return setQty(String(Math.floor(owned * fraction)));
+    if (side === "SELL" && owned > 0) return setQty(String(Math.floor(owned * fraction)));
+    if (buyingBack) return setQty(String(Math.floor(shorted * fraction)));
     if (!priced || !portfolio) return;
+    if (shorting) {
+      // margin is about half the sale, so start there and step down until it fits
+      const spend = portfolio.buying_power_cents * fraction;
+      let k = Math.floor((2 * spend) / priced) + 1;
+      while (k > 0 && marginFor(k) > spend) k--;
+      return setQty(String(k));
+    }
     const unit = estimate("BUY", 1, priced, type !== "LIMIT", { ...settings, commission_cents: 0 }).total;
     setQty(String(Math.max(0, Math.floor((portfolio.buying_power_cents * fraction - settings.commission_cents) / unit))));
   };
@@ -188,7 +220,9 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
               >
                 {mode === "shares" ? "Shares" : "Amount in dollars"}
               </button>
-              <span className="num">{side === "BUY" ? `Buying power ${money(portfolio?.buying_power_cents)}` : `You own ${fmtShares(owned)}`}</span>
+              <span className="num">
+                {buyingBack ? `Short ${fmtShares(shorted)}` : side === "SELL" && !shorting ? `You own ${fmtShares(owned)}` : `Buying power ${money(portfolio?.buying_power_cents)}`}
+              </span>
             </div>
             <div className="grid grid-cols-[1fr_auto] gap-2">
               {mode === "shares" ? (
@@ -221,9 +255,15 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
           <dl className="grid gap-0.5 border-t border-dashed border-paper-rule pt-2.5 font-mono text-[12px]">
             <div className="flex justify-between"><dt>Price{type !== "LIMIT" && settings.slippage_bps ? " with slippage" : ""}</dt><dd className="num">{est ? money(est.price) : "—"}</dd></div>
             <div className="flex justify-between"><dt>Commission</dt><dd className="num">{est ? money(est.fee) : "—"}</dd></div>
+            {shorting && <div className="flex justify-between"><dt>Margin held</dt><dd className="num">{est ? money(margin) : "—"}</dd></div>}
             <div className="flex justify-between font-medium"><dt>Estimated {side === "BUY" ? "cost" : "proceeds"}</dt><dd className="num">{est ? money(est.total) : "—"}</dd></div>
           </dl>
 
+          {buyIn ? (
+            <p className="text-xs text-paper-ink/75">
+              If the price rises to about {money(buyIn)}, the app buys the short back for you, while the collateral still covers it.
+            </p>
+          ) : null}
           {closedNote && <p className="text-xs text-paper-ink/75">{closedNote}</p>}
 
           <button

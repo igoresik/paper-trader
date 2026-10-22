@@ -57,6 +57,8 @@ export interface Trade {
   cash_after_cents: number;
   executed_at: number;
   practice?: boolean;
+  /** a short bought back because its collateral ran low */
+  buy_in?: boolean;
 }
 
 export interface Order {
@@ -69,6 +71,8 @@ export interface Order {
   limit_cents: number | null;
   stop_cents: number | null;
   reserved_cents: number;
+  /** 1: a sell that may open or add to a short */
+  short?: number;
   status: "OPEN" | "FILLED" | "CANCELLED" | "REJECTED";
   reason: string | null;
   created_at: number;
@@ -385,9 +389,9 @@ export const api = {
   historyCsvUrl: (id: number) => `/portfolio/${id}/history.csv`,
   equity: (id: number, range: string) => call<Equity>("GET", `/portfolio/${id}/equity${q({ range })}`),
   report: (id: number) => call<ReportCard>("GET", `/portfolio/${id}/report`),
-  execute: (accountId: number, symbol: string, side: Side, shares: number) =>
-    call<Trade | Order>("POST", "/orders/execute", { account_id: accountId, symbol, side, shares }),
-  placeOrder: (body: { account_id: number; symbol: string; side: Side; type: "LIMIT" | "STOP"; shares: number; limit_cents?: number; stop_cents?: number }) =>
+  execute: (accountId: number, symbol: string, side: Side, shares: number, short = false) =>
+    call<Trade | Order>("POST", "/orders/execute", { account_id: accountId, symbol, side, shares, short }),
+  placeOrder: (body: { account_id: number; symbol: string; side: Side; type: "LIMIT" | "STOP"; shares: number; limit_cents?: number; stop_cents?: number; short?: boolean }) =>
     call<Order>("POST", "/orders", body),
   orders: (accountId: number, status = "OPEN") => call<Order[]>("GET", `/orders${q({ account_id: accountId, status })}`),
   cancelOrder: (id: number) => call<Order>("DELETE", `/orders/${id}`),
@@ -412,7 +416,7 @@ export const api = {
   startReplay: (symbol: string, start: number, cash: number) =>
     call<ReplayState>("POST", "/replays", { symbol, start, starting_cash_cents: cash }),
   replay: (id: number) => call<ReplayState>("GET", `/replays/${id}`),
-  replayOrder: (id: number, body: { side: Side; type: OrderType; shares: number; limit_cents?: number; stop_cents?: number }) =>
+  replayOrder: (id: number, body: { side: Side; type: OrderType; shares: number; limit_cents?: number; stop_cents?: number; short?: boolean }) =>
     call<Order>("POST", `/replays/${id}/orders`, body),
   stepReplay: (id: number, days: number) => call<{ fills: Trade[]; state: ReplayState }>("POST", `/replays/${id}/step`, { days }),
   closeReplay: (id: number) => call<void>("DELETE", `/replays/${id}`),
