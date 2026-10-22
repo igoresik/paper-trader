@@ -61,7 +61,7 @@ It is never tested on a random split, because that would let the future leak int
 
 **Walk-forward validation.** It trains on the past, tests on the next block of bars, and rolls forward, five times. On the same bars it is compared with three simple rules: always the most common outcome, always BUY, and "same as yesterday".
 
-**Backtest.** Buying on its BUY calls is compared with buying and holding over the same days, after a cost on every trade. A second strategy holds between half and all of the money, more when the model leans up harder than usual, and is compared with holding its average amount all the time: holding 75% of a rising market beats sitting in cash whatever the model says, so only the gap between those two is the model's doing.
+**Backtest.** Buying on its BUY calls is compared with buying and holding over the same days, after a cost on every trade. A second strategy holds between half and all of the money, more when the model leans up harder than usual, and is compared with holding its average amount all the time: holding 75% of a rising market beats sitting in cash whatever the model says, so only the gap between those two is the model's doing. A third holds less, down to half, when the move reading expects a bigger move than usual, and is compared with holding its average amount the same way. On SPY, QQQ, IWM and DIA (runs on 22 October 2026, default settings) it trailed that steady amount on all four, in return and in Sharpe: big moves go both ways, and on SPY the days rated likeliest to move big rose the most on average.
 
 **Live record.** The signal you see for each day is stored before the outcome is known, so the live record can't be rewritten by retraining.
 
