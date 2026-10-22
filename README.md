@@ -1,10 +1,23 @@
 # Paper Trader
 
+[![CI](https://github.com/igoresik/paper-trader/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/igoresik/paper-trader/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/igoresik/paper-trader?label=release)](https://github.com/igoresik/paper-trader/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
+
 A Windows desktop app for practising trades with fake money on real US market prices, with a machine-learning signal that shows its own track record, including when it is no better than guessing.
 
 ![The trading desk: watchlist, chart with indicators, order ticket and the model's signal](docs/desk.png)
 
 ## Download (Windows)
+
+> [!TIP]
+> **On macOS or Linux?** The installer is Windows-only, but the same app runs in your browser with [Docker](#docker): `docker compose up --build`, then open http://localhost:8000. You can also [run it from source](#run-from-source).
 
 1. Get `PaperTrader-Setup-<version>.exe` from the repository's **Releases** page.
 2. Run it. It installs for your Windows user only (no admin prompt) and adds Paper Trader to the Start menu. You can tick a desktop shortcut too.
@@ -86,17 +99,38 @@ So the model can't tell which way SPY goes next: 52% is barely better than tossi
 
 ## Run from source
 
+Needs **Python 3.12 or newer** (CI runs 3.14) and **Node.js 22.22+ or 24.15+** (what the UI's build and test tools ask for).
+
+First make a virtual environment and switch it on.
+
+Windows (PowerShell):
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
-py -3.14 -m venv .venv
-.venv\Scripts\pip install -r requirements-dev.txt
+
+macOS / Linux:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Then, the same everywhere:
+
+```sh
+python -m pip install -r requirements-dev.txt
 cd ui
 npm ci
 npm run build
 cd ..
-.venv\Scripts\python -m papertrader serve
+python -m papertrader serve
 ```
 
-Then open http://127.0.0.1:8000, or run `.venv\Scripts\python launcher.py` for the desktop window. For UI work with instant reload, keep `serve` running and start `npm run dev` in `ui/`.
+Then open http://127.0.0.1:8000. On Windows, `python launcher.py` opens the desktop window instead. For UI work with instant reload, keep `serve` running and start `npm run dev` in `ui/`.
+
+If PowerShell won't run `Activate.ps1`, use `.venv\Scripts\activate.bat` from Command Prompt instead. Data from a source run is kept in `data/` in the repository folder, which git ignores.
 
 Command line:
 
@@ -112,6 +146,37 @@ The API is documented at http://127.0.0.1:8000/docs.
 ## Docker
 
 `docker compose up --build` runs the same app without the desktop window at http://localhost:8000. It only listens on this computer, because the app has no login. Data lives in the `paper-data` volume.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["<b>React UI</b><br/>desktop window or any browser"]
+    YF(["Yahoo Finance"])
+    subgraph proc ["one Python process"]
+        API["<b>FastAPI</b><br/>REST + /ws live feed"]
+        W["<b>Worker</b><br/>price stream, order matching"]
+        ML["<b>ML engine</b><br/>scikit-learn, walk-forward"]
+    end
+    DB[("<b>SQLite ledger</b><br/>BEGIN IMMEDIATE, WAL")]
+
+    UI <-->|"HTTP + WebSocket"| API
+    API -->|"orders, portfolios"| DB
+    API -->|"Model lab runs"| ML
+    YF -->|"live prices, history"| W
+    W -->|"fills, bars, splits"| DB
+    W -->|"new bar"| ML
+    ML -->|"features, runs, signals"| DB
+    W -.->|"ticks, fills, signals"| API
+```
+
+A price from Yahoo's stream reaches the worker, which fills any waiting order it triggers, each fill in one transaction, and pushes the quote and the fill to every open window over `/ws`. The UI never talks to Yahoo or the database itself.
+
+### Design decisions
+
+- **SQLite in one process, not PostgreSQL and services.** It's a single-user desktop app, so the API, worker and model are modules of one process and the database is one file: nothing to install, start or secure. `BEGIN IMMEDIATE` takes the write lock before anything is read, so two orders can't both spend the same cash, and WAL mode keeps readers from waiting on a writer.
+- **Whole cents, not floats.** In binary floating point (IEEE 754) `0.1 + 0.2` isn't `0.3`, and a ledger that drifts by a cent can't be trusted. Money is stored as integers, a position keeps its total cost rather than a rounded average, and every rounding goes against you, so the ledger can never create money.
+- **A cash account, never borrowed money.** A `CHECK` constraint keeps cash at zero or above, so there are no margin loans or interest to model. Short selling (since 1.3) keeps the same rule: the sale's money and half as much again are held as collateral, and a forced buy-back only ever spends cash the account has.
 
 ## Layout
 
@@ -154,8 +219,10 @@ The API is documented at http://127.0.0.1:8000/docs.
 
 ## Tests
 
-```
-.venv\Scripts\python -m pytest
+With the virtual environment switched on:
+
+```sh
+python -m pytest
 cd ui
 npm test
 ```
