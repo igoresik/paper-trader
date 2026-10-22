@@ -46,8 +46,38 @@ def money(cents):
 
 
 def avg_cost(basis_cents, shares):
-    """Cost per share, rounded half up to the cent."""
+    """Cost per share (for a short, what each share sold for), rounded half up to the cent."""
+    basis_cents, shares = abs(basis_cents), abs(shares)
     return (2 * basis_cents + shares) // (2 * shares)
+
+
+# A short's sale money stays as collateral with half as much again from free cash (150%, as US margin rules ask),
+# and the short is bought back once that collateral is only 130% of what buying it back costs.
+def _collateral(basis_cents):
+    """Collateral a short position holds: 150% of what its sales brought in (its basis is minus that)."""
+    return max(0, (1 - 3 * basis_cents) // 2)
+
+
+COLLATERAL_SQL = ("SELECT COALESCE(SUM(MAX(0, (1 - 3 * cost_basis_cents) / 2)), 0) AS c FROM positions"
+                  " WHERE account_id = ? AND shares < 0")
+
+
+def buy_in_price(shares, basis_cents):
+    """Price per share at which a short's collateral falls to 130% of what buying it back costs."""
+    return _ceil_div(10 * _collateral(basis_cents), 13 * -shares)
+
+
+def _short_margin(basis_cents, proceeds):
+    """Free cash a short sale ties up: the extra collateral, less the sale's own money."""
+    return _collateral(basis_cents - proceeds) - _collateral(basis_cents) - proceeds
+
+
+def _removed(basis_cents, owned, shares):
+    """The part of a position's basis that closing shares of it takes away, rounded toward zero."""
+    if shares == abs(owned):
+        return basis_cents
+    part = abs(basis_cents) * shares // abs(owned)
+    return part if basis_cents >= 0 else -part
 
 
 def _now():
@@ -197,51 +227,71 @@ def _owned(conn, account_id, symbol):
 
 
 def _held(conn, account_id, symbol, skip_order):
-    """Cash held by open buys and shares of symbol held by open sells, leaving out skip_order."""
+    """Cash held by open orders, shares of symbol held by open sells, and short shares held by open buys
+    of symbol, leaving out skip_order."""
     row = _rows(
         conn,
-        "SELECT COALESCE(SUM(CASE WHEN side = 'BUY' THEN reserved_cents END), 0) AS cash,"
-        " COALESCE(SUM(CASE WHEN side = 'SELL' AND symbol = ? THEN shares END), 0) AS shares"
+        "SELECT COALESCE(SUM(reserved_cents), 0) AS cash,"
+        " COALESCE(SUM(CASE WHEN side = 'SELL' AND NOT short AND symbol = ? THEN shares END), 0) AS selling,"
+        " COALESCE(SUM(CASE WHEN side = 'BUY' AND symbol = ? THEN shares END), 0) AS buying"
         " FROM orders WHERE account_id = ? AND status = 'OPEN' AND id IS NOT ?",
-        (symbol, account_id, skip_order),
+        (symbol, symbol, account_id, skip_order),
     )[0]
-    return row["cash"], row["shares"]
+    return row["cash"], row["selling"], row["buying"]
 
 
-def _check_cash(conn, acct, symbol, needed, skip_order=None):
-    held, _ = _held(conn, acct["id"], symbol, skip_order)
-    free = acct["cash_balance_cents"] - held
+def _check_cash(conn, acct, symbol, needed, skip_order=None, released=0, short=False):
+    """released: collateral that buying back part of a short frees for this order."""
+    held, _, _ = _held(conn, acct["id"], symbol, skip_order)
+    backing = _rows(conn, COLLATERAL_SQL, (acct["id"],))[0]["c"]
+    free = acct["cash_balance_cents"] - held - backing + released
     if needed > free:
-        note = f" {money(held)} is held for open orders." if held else ""
-        raise InsufficientFunds(f"Not enough cash: this order needs {money(needed)} and you have {money(free)}.{note}")
+        note = (f" {money(held)} is held for open orders." if held else "") + (
+            f" {money(backing - released)} backs your short sales." if backing - released else "")
+        what = f"selling short needs {money(needed)} of margin" if short else f"this order needs {money(needed)}"
+        raise InsufficientFunds(f"Not enough cash: {what} and you have {money(free)}.{note}")
 
 
 def _check_shares(conn, account_id, symbol, wanted, skip_order=None):
     owned, _ = _owned(conn, account_id, symbol)
-    _, held = _held(conn, account_id, symbol, skip_order)
+    _, held, _ = _held(conn, account_id, symbol, skip_order)
     if wanted > owned - held:
-        if not owned:
-            raise NotEnoughShares(f"You don't own any {symbol}.")
+        if owned <= 0:
+            raise NotEnoughShares(f"You don't own any {symbol}. Sell short to bet on it falling.")
         note = f" {held} are already in open orders." if held else ""
         raise NotEnoughShares(f"You own {owned} {symbol}, so you can sell up to {owned - held}.{note}")
+
+
+def _check_cover(conn, account_id, symbol, owned, wanted, skip_order=None):
+    _, _, held = _held(conn, account_id, symbol, skip_order)
+    if wanted > -owned - held:
+        note = f" {held} are already in open orders." if held else ""
+        raise NotEnoughShares(f"You're short {-owned} {symbol}, so you can buy back up to {-owned - held}.{note}")
+
+
+def _check_short(owned, symbol):
+    if owned > 0:
+        raise NotEnoughShares(f"You own {owned} {symbol}: sell those before selling short.")
 
 
 # orders
 
 
-def _new_order(conn, account_id, symbol, side, kind, shares, limit_cents, stop_cents, reserved, now):
+def _new_order(conn, account_id, symbol, side, kind, shares, limit_cents, stop_cents, reserved, now, short=False,
+               reason=None):
     if shares < 1:
         raise LedgerError("Enter at least 1 share.")
     return _rows(
         conn,
-        "INSERT INTO orders (account_id, symbol, side, type, shares, limit_cents, stop_cents, reserved_cents, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
-        (account_id, symbol, side, kind, shares, limit_cents, stop_cents, reserved, now),
+        "INSERT INTO orders (account_id, symbol, side, type, shares, limit_cents, stop_cents, reserved_cents, created_at,"
+        " short, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        (account_id, symbol, side, kind, shares, limit_cents, stop_cents, reserved, now, int(short), reason),
     )[0]
 
 
-def _fill(conn, order, price_cents, now, costs, slip):
-    """Book one fill inside the caller's transaction. Claiming the order first means it can only fill once."""
+def _fill(conn, order, price_cents, now, costs, slip, forced=False):
+    """Book one fill inside the caller's transaction. Claiming the order first means it can only fill once.
+    forced: a buy-in, which has already checked what the cash can pay."""
     claimed = conn.execute(
         "UPDATE orders SET status = 'FILLED', closed_at = ? WHERE id = ? AND status = 'OPEN'", (now, order["id"])
     ).rowcount
@@ -251,32 +301,36 @@ def _fill(conn, order, price_cents, now, costs, slip):
     side, symbol, shares = order["side"], order["symbol"], order["shares"]
     price, fee, total = fill_terms(side, shares, price_cents, costs, slip)
     slipped = abs(price - price_cents) * shares
-    realized = None
-    if side == "BUY":
-        _check_cash(conn, acct, symbol, total, order["id"])
+    owned, basis = _owned(conn, acct["id"], symbol)
+    cash_change = total if side == "SELL" else -total
+    if side == "SELL" and not order["short"] or side == "BUY" and owned < 0:  # closing some of a position
+        if side == "SELL":
+            _check_shares(conn, acct["id"], symbol, shares, order["id"])
+        elif not forced:
+            _check_cover(conn, acct["id"], symbol, owned, shares, order["id"])
+        removed = _removed(basis, owned, shares)
+        if side == "BUY" and not forced:
+            _check_cash(conn, acct, symbol, total, order["id"], released=_collateral(basis) - _collateral(basis - removed))
+        realized = cash_change - removed
+    else:  # opening or adding to one; the basis takes the cash paid, or minus the cash a short sale brings in
+        if side == "BUY":
+            _check_cash(conn, acct, symbol, total, order["id"])
+        else:
+            _check_short(owned, symbol)
+            _check_cash(conn, acct, symbol, _short_margin(basis, total), order["id"], short=True)
+        removed, realized = cash_change, None
+    if acct["cash_balance_cents"] + cash_change < 0:
+        raise InsufficientFunds(f"Not enough cash to pay this sale's {money(fee)} commission.")
+    left = owned + (shares if side == "BUY" else -shares)
+    if left:
         conn.execute(
             "INSERT INTO positions (account_id, symbol, shares, cost_basis_cents) VALUES (?, ?, ?, ?)"
-            " ON CONFLICT (account_id, symbol) DO UPDATE SET shares = shares + excluded.shares,"
-            " cost_basis_cents = cost_basis_cents + excluded.cost_basis_cents",
-            (acct["id"], symbol, shares, total),
+            " ON CONFLICT (account_id, symbol) DO UPDATE SET shares = excluded.shares,"
+            " cost_basis_cents = excluded.cost_basis_cents",
+            (acct["id"], symbol, left, basis - removed),
         )
-        cash_change = -total
     else:
-        _check_shares(conn, acct["id"], symbol, shares, order["id"])
-        owned, basis = _owned(conn, acct["id"], symbol)
-        removed = basis if shares == owned else basis * shares // owned
-        realized = total - removed
-        if shares == owned:
-            conn.execute("DELETE FROM positions WHERE account_id = ? AND symbol = ?", (acct["id"], symbol))
-        else:
-            conn.execute(
-                "UPDATE positions SET shares = shares - ?, cost_basis_cents = cost_basis_cents - ?"
-                " WHERE account_id = ? AND symbol = ?",
-                (shares, removed, acct["id"], symbol),
-            )
-        if acct["cash_balance_cents"] + total < 0:
-            raise InsufficientFunds(f"Not enough cash to pay this sale's {money(fee)} commission.")
-        cash_change = total
+        conn.execute("DELETE FROM positions WHERE account_id = ? AND symbol = ?", (acct["id"], symbol))
     cash_after = _rows(
         conn,
         "UPDATE accounts SET cash_balance_cents = cash_balance_cents + ? WHERE id = ? RETURNING cash_balance_cents",
@@ -292,20 +346,22 @@ def _fill(conn, order, price_cents, now, costs, slip):
     return {**trade, "type": order["type"]}
 
 
-def execute_market(account_id, symbol, side, shares, price_cents, costs=Costs(), now=None):
-    """Fill a market order now at price_cents. A refused order leaves no trace."""
+def execute_market(account_id, symbol, side, shares, price_cents, costs=Costs(), now=None, short=False):
+    """Fill a market order now at price_cents. A refused order leaves no trace. short: a sell may open or add to
+    a short; without it a sell only sells shares held."""
     now = now or _now()
     with db.tx() as conn:
         _live_account(conn, account_id)
-        order = _new_order(conn, account_id, symbol, side, "MARKET", shares, None, None, 0, now)
+        order = _new_order(conn, account_id, symbol, side, "MARKET", shares, None, None, 0, now, short and side == "SELL")
         return _fill(conn, order, price_cents, now, costs, slip=True)
 
 
 def place_order(
     account_id, symbol, side, kind, shares, limit_cents=None, stop_cents=None, ref_price_cents=None,
-    costs=Costs(), now=None,
+    costs=Costs(), now=None, short=False,
 ):
-    """Open an order that waits for its price: a limit, a stop, or a market order queued while the market is closed."""
+    """Open an order that waits for its price: a limit, a stop, or a market order queued while the market is closed.
+    A buy holds the cash it may need and a short sale its margin."""
     now = now or _now()
     if kind == "LIMIT" and not (limit_cents and stop_cents is None):
         raise LedgerError("A limit order needs a limit price.")
@@ -318,16 +374,26 @@ def place_order(
             raise LedgerError(f"A buy stop has to be above the current price ({money(ref_price_cents)}).")
         if side == "SELL" and stop_cents >= ref_price_cents:
             raise LedgerError(f"A sell stop has to be below the current price ({money(ref_price_cents)}).")
+    short = short and side == "SELL"
     with db.tx() as conn:
         acct = _live_account(conn, account_id)
-        reserved = 0
+        owned, basis = _owned(conn, account_id, symbol)
+        reserved, estimate = 0, {"LIMIT": limit_cents, "STOP": stop_cents, "MARKET": ref_price_cents}[kind]
         if side == "BUY":
-            estimate = {"LIMIT": limit_cents, "STOP": stop_cents, "MARKET": ref_price_cents}[kind]
             reserved = fill_terms("BUY", shares, estimate, costs, slip=kind != "LIMIT")[2]
+            if owned < 0:  # buying back: the collateral it frees pays for some of it
+                _check_cover(conn, account_id, symbol, owned, shares)
+                reserved -= _collateral(basis) - _collateral(basis - _removed(basis, owned, shares))
+            reserved = max(0, reserved)
             _check_cash(conn, acct, symbol, reserved)
+        elif short:
+            _check_short(owned, symbol)
+            proceeds = fill_terms("SELL", shares, estimate, costs, slip=kind != "LIMIT")[2]
+            reserved = max(0, _short_margin(basis, proceeds))
+            _check_cash(conn, acct, symbol, reserved, short=True)
         else:
             _check_shares(conn, account_id, symbol, shares)
-        return _new_order(conn, account_id, symbol, side, kind, shares, limit_cents, stop_cents, reserved, now)
+        return _new_order(conn, account_id, symbol, side, kind, shares, limit_cents, stop_cents, reserved, now, short)
 
 
 def cancel_order(order_id, now=None):
@@ -378,10 +444,10 @@ def _reject(order, reason, now):
 
 
 def match(symbol, bars, costs=Costs(), account_id=None):
-    """Fill the symbol's open orders against bars (oldest first), booking fills in the order they happened.
-    Live prices only reach live portfolios; a replay passes its own account_id with the day it moves to."""
+    """Fill the symbol's open orders and buy-ins against bars (oldest first), booking fills in the order they
+    happened. Live prices only reach live portfolios; a replay passes its own account_id with the day it moves to."""
     hits = []
-    whose = ("o.account_id = ?", (symbol, account_id)) if account_id else ("a.replay_at IS NULL", (symbol,))
+    whose = ("a.id = ?", (symbol, account_id)) if account_id else ("a.replay_at IS NULL", (symbol,))
     for order in db.query("SELECT o.* FROM orders o JOIN accounts a ON a.id = o.account_id"
                           f" WHERE o.symbol = ? AND o.status = 'OPEN' AND {whose[0]}", whose[1]):
         for bar in bars:
@@ -389,17 +455,52 @@ def match(symbol, bars, costs=Costs(), account_id=None):
             if bar["ts"] >= order["created_at"] and (price := trigger_price(order, bar)) is not None:
                 hits.append((bar["ts"], order["id"], order, price))
                 break
+    # a short is bought back like a buy stop at its buy-in price, from the bar after it last changed
+    for pos in db.query("SELECT p.*, (SELECT MAX(executed_at) FROM trades t WHERE t.account_id = p.account_id"
+                        " AND t.symbol = p.symbol) AS since FROM positions p JOIN accounts a ON a.id = p.account_id"
+                        f" WHERE p.symbol = ? AND p.shares < 0 AND a.archived_at IS NULL AND {whose[0]}", whose[1]):
+        stop = {"side": "BUY", "type": "STOP", "stop_cents": buy_in_price(pos["shares"], pos["cost_basis_cents"])}
+        for bar in bars:
+            if bar["ts"] >= (pos["since"] or 0) and (price := trigger_price(stop, bar)) is not None:
+                hits.append((bar["ts"], 0, pos, price))
+                break
     events = []
-    for ts, _, order, price in sorted(hits, key=lambda hit: hit[:2]):
+    for ts, order_id, order, price in sorted(hits, key=lambda hit: hit[:2]):
         try:
+            if not order_id:
+                if event := _buy_in(order, price, ts, costs):
+                    events.append(event)
+                continue
             with db.tx() as conn:
                 events.append(_fill(conn, order, price, ts, costs, slip=order["type"] != "LIMIT"))
         except Conflict:
             continue  # cancelled, or filled by another run meanwhile
         except LedgerError as refused:
-            if event := _reject(order, str(refused), ts):
+            if order_id and (event := _reject(order, str(refused), ts)):
                 events.append(event)
     return events
+
+
+def _buy_in(pos, price, now, costs):
+    """Buy back a short whose collateral fell to 130% of what buying it back costs, cancelling its open buys.
+    If a jump took the price past what the cash can pay, it buys back as many shares as the cash allows."""
+    with db.tx() as conn:
+        owned, basis = _owned(conn, pos["account_id"], pos["symbol"])
+        if owned >= 0 or price < buy_in_price(owned, basis):
+            return None  # bought back or changed since the bar was picked
+        cash = _live_account(conn, pos["account_id"])["cash_balance_cents"]
+        shares = min(-owned, cash // fill_terms("BUY", 1, price, costs)[0])
+        while shares and fill_terms("BUY", shares, price, costs)[2] > cash:
+            shares -= 1
+        if not shares:
+            return None
+        conn.execute("UPDATE orders SET status = 'CANCELLED', reason = 'The forced buy-in bought the short back.',"
+                     " closed_at = ? WHERE account_id = ? AND symbol = ? AND side = 'BUY' AND status = 'OPEN'",
+                     (now, pos["account_id"], pos["symbol"]))
+        reason = f"Forced buy-in: at {money(price)} the collateral was down to 130% of the cost of buying back."
+        order = _new_order(conn, pos["account_id"], pos["symbol"], "BUY", "MARKET", shares, None, None, 0, now,
+                           reason=reason)
+        return {**_fill(conn, order, price, now, costs, slip=True, forced=True), "buy_in": True}
 
 
 # splits
@@ -433,13 +534,14 @@ def apply_splits(symbol, now=None):
                                     " FROM trades WHERE account_id = ? AND symbol = ? AND executed_at >= ?",
                               (pos["account_id"], symbol, ts))[0]["n"]
                 before = pos["shares"] - since
-                if before <= 0:
+                if not before:
                     continue
+                # a short rounds down too: it owes the fraction more and gets its value, as if sold short at the last close
                 exact = before * ratio
                 after = _whole(exact)
                 cash = int((exact - after) * last[0]["close_cents"]) if last else 0
-                basis = pos["cost_basis_cents"] - int(pos["cost_basis_cents"] * (exact - after) / (exact + since))
                 if after + since:
+                    basis = pos["cost_basis_cents"] - int(pos["cost_basis_cents"] * (exact - after) / (exact + since))
                     conn.execute("UPDATE positions SET shares = ?, cost_basis_cents = ? WHERE account_id = ? AND symbol = ?",
                                  (after + since, basis, pos["account_id"], symbol))
                 else:
@@ -507,10 +609,10 @@ def portfolio(account_id, price, prev_close, day_start):
     )
     totals = db.query(
         "SELECT (SELECT COALESCE(SUM(realized_pnl_cents), 0) FROM trades WHERE account_id = :a) AS realized,"
-        " (SELECT COALESCE(SUM(reserved_cents), 0) FROM orders"
-        "  WHERE account_id = :a AND status = 'OPEN' AND side = 'BUY') AS reserved",
+        " (SELECT COALESCE(SUM(reserved_cents), 0) FROM orders WHERE account_id = :a AND status = 'OPEN') AS reserved",
         {"a": account_id},
     )[0]
+    backing = db.query(COLLATERAL_SQL, (account_id,))[0]["c"]
     rows, day_change, sign = [], 0, {"BUY": 1, "SELL": -1}
     for symbol in sorted(held.keys() | {t["symbol"] for t in today}):
         pos = held.get(symbol, {"shares": 0, "cost_basis_cents": 0})
@@ -533,7 +635,7 @@ def portfolio(account_id, price, prev_close, day_start):
     return {
         "account": acct,
         "cash_cents": cash,
-        "buying_power_cents": cash - totals["reserved"],
+        "buying_power_cents": cash - totals["reserved"] - backing,
         "invested_cents": invested,
         "total_value_cents": cash + invested,
         "total_return_cents": cash + invested - acct["starting_cash_cents"],
@@ -560,10 +662,10 @@ def max_drawdown(values):
 
 
 def report_card(account_id, days, close_on):
-    """The trader's own record: how often a sale made money, how big wins and losses were, what costs took,
-    and the share of days with money in the market."""
+    """The trader's own record: how often closing a trade (a sale, or buying back a short) made money, how big
+    wins and losses were, what costs took, and the share of days with money in the market."""
     sold = [r["realized_pnl_cents"] for r in db.query(
-        "SELECT realized_pnl_cents FROM trades WHERE account_id = ? AND side = 'SELL'", (account_id,))]
+        "SELECT realized_pnl_cents FROM trades WHERE account_id = ? AND realized_pnl_cents IS NOT NULL", (account_id,))]
     wins, losses = [p for p in sold if p > 0], [p for p in sold if p < 0]
     costs = db.query("SELECT COALESCE(SUM(commission_cents), 0) AS fees, COALESCE(SUM(slippage_cents), 0) AS slip"
                      " FROM trades WHERE account_id = ?", (account_id,))[0]

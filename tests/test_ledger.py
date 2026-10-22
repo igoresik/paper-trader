@@ -1,5 +1,6 @@
 import sqlite3
 import threading
+from contextlib import closing
 
 import pytest
 
@@ -19,6 +20,10 @@ def buy(acc, shares, price, **kw):
 
 def sell(acc, shares, price, **kw):
     return ledger.execute_market(acc, "AAPL", "SELL", shares, price, **kw)
+
+
+def short(acc, shares, price, **kw):
+    return ledger.execute_market(acc, "AAPL", "SELL", shares, price, short=True, **kw)
 
 
 def bar(ts, o, h=None, low=None):
@@ -392,3 +397,148 @@ def test_report_card_scores_the_trader():
     assert card == {"sells": 2, "wins": 1, "avg_win_cents": 850, "avg_loss_cents": -650,
                     "commission_cents": 300, "slippage_cents": 0, "time_in_market": 2 / 3}
     assert ledger.max_drawdown([100_000, 99_900, 101_800, 100_200]) == 100_200 / 101_800 - 1
+
+
+# short selling
+
+
+def test_a_short_sale_opens_a_negative_position_backed_by_collateral():
+    acc = account(100_000)
+    receipt = short(acc, 10, 1_000, now=T0 + 100)
+    assert (receipt["total_cents"], receipt["realized_pnl_cents"], receipt["cash_after_cents"]) == (10_000, None, 110_000)
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -10, "cost_basis_cents": -10_000}]
+    p = ledger.portfolio(acc, lambda s: 1_100, lambda s: 1_000, T0)
+    row = p["positions"][0]
+    assert (row["avg_cost_cents"], row["market_value_cents"], row["unrealized_pnl_cents"]) == (1_000, -11_000, -1_000)
+    assert (p["total_value_cents"], p["day_change_cents"]) == (99_000, -1_000)
+    assert p["buying_power_cents"] == 110_000 - 15_000  # the $100.00 it brought in plus half again backs it
+
+
+def test_a_short_sale_needs_half_its_value_as_margin():
+    acc = account(1_000)
+    before = snapshot()
+    with pytest.raises(InsufficientFunds, match=r"selling short needs \$50\.00 of margin and you have \$10\.00"):
+        short(acc, 10, 1_000)
+    assert snapshot() == before
+
+
+def test_buying_back_books_the_profit_and_frees_the_collateral():
+    acc = account(100_000)
+    short(acc, 10, 1_000)
+    assert buy(acc, 4, 800)["realized_pnl_cents"] == 800
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -6, "cost_basis_cents": -6_000}]
+    assert buy(acc, 6, 900)["realized_pnl_cents"] == 600
+    assert ledger.positions(acc) == []
+    p = ledger.portfolio(acc, lambda s: None, lambda s: None, T0)
+    assert p["cash_cents"] == p["buying_power_cents"] == 100_000 + 10_000 - 3_200 - 5_400
+
+
+def test_one_order_never_goes_from_short_to_long_or_back():
+    acc = account()
+    short(acc, 10, 1_000)
+    with pytest.raises(NotEnoughShares, match="You're short 10 AAPL, so you can buy back up to 10"):
+        buy(acc, 11, 1_000)
+    with pytest.raises(NotEnoughShares, match="You don't own any AAPL"):
+        sell(acc, 1, 1_000)  # a plain sell never adds to a short
+    other = ledger.create_account("Other", 100_000)["id"]
+    buy(other, 5, 1_000)
+    with pytest.raises(NotEnoughShares, match="You own 5 AAPL: sell those before selling short"):
+        ledger.execute_market(other, "AAPL", "SELL", 6, 1_000, short=True)
+
+
+def test_a_short_is_bought_back_like_a_buy_stop_at_its_buy_in_price():
+    acc = account(100_000)
+    short(acc, 10, 1_000, now=T0)  # $150.00 of collateral is 130% of buying back at $11.54
+    assert ledger.buy_in_price(-10, -10_000) == 1_154
+    events = ledger.match("AAPL", [bar(T0 - 60, 2_000), bar(T0 + 60, 1_100, 1_150), bar(T0 + 120, 1_120, 1_200)])
+    assert [(e["side"], e["shares"], e["price_cents"], e["realized_pnl_cents"], e["buy_in"]) for e in events] == [
+        ("BUY", 10, 1_154, -1_540, True)]
+    assert ledger.positions(acc) == []
+    assert ledger.orders(acc, "FILLED")[0]["reason"].startswith("Forced buy-in")
+
+
+def test_a_buy_in_after_a_jump_fills_at_the_open():
+    acc = account(100_000)
+    short(acc, 10, 1_000, now=T0)
+    assert ledger.match("AAPL", [bar(T0 + 60, 1_300)])[0]["price_cents"] == 1_300
+
+
+def test_a_buy_in_past_what_the_cash_can_pay_buys_back_what_it_can():
+    acc = account(5_000)
+    short(acc, 10, 1_000, now=T0)  # all the free cash is margin
+    assert ledger.match("AAPL", [bar(T0 + 60, 2_000)])[0]["shares"] == 7
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -3, "cost_basis_cents": -3_000}]
+    assert ledger.account(acc)["cash_balance_cents"] == 1_000
+
+
+def test_a_buy_in_cancels_open_buys_of_that_symbol():
+    acc = account()
+    short(acc, 10, 1_000, now=T0)
+    order = ledger.place_order(acc, "AAPL", "BUY", "LIMIT", 10, limit_cents=900, now=T0)
+    assert order["reserved_cents"] == 0  # the collateral it frees covers it
+    ledger.match("AAPL", [bar(T0 + 60, 1_200)])
+    cancelled = ledger.orders(acc, "CANCELLED")
+    assert [(o["id"], o["reason"]) for o in cancelled] == [(order["id"], "The forced buy-in bought the short back.")]
+
+
+def test_open_short_sale_orders_hold_their_margin():
+    acc = account(100_000)
+    order = ledger.place_order(acc, "AAPL", "SELL", "LIMIT", 10, limit_cents=1_000, now=T0, short=True)
+    assert (order["short"], order["reserved_cents"]) == (1, 5_000)
+    assert ledger.portfolio(acc, lambda s: None, lambda s: None, T0)["buying_power_cents"] == 95_000
+    with pytest.raises(InsufficientFunds):
+        ledger.place_order(acc, "AAPL", "SELL", "LIMIT", 200, limit_cents=1_000, now=T0, short=True)
+    assert ledger.match("AAPL", [bar(T0 + 60, 1_050)])[0]["price_cents"] == 1_050
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -10, "cost_basis_cents": -10_500}]
+
+
+def test_report_card_and_equity_curve_count_shorts():
+    acc = account(100_000)
+    short(acc, 10, 1_000, now=T0 + 100)
+    buy(acc, 10, 900, now=T0 + 86_400 + 100)
+    days = [(T0, T0 + 1_000), (T0 + 86_400, T0 + 87_400)]
+    closes = {T0: 950, T0 + 86_400: 900}
+    card = ledger.report_card(acc, days, lambda symbol, day: closes[day])
+    assert (card["sells"], card["wins"], card["avg_win_cents"], card["time_in_market"]) == (1, 1, 1_000, 0.5)
+    assert ledger.equity_curve(acc, days, lambda symbol, day: closes[day]) == [100_500, 101_000]
+
+
+def test_splits_move_shorts_too():
+    acc = account()
+    short(acc, 10, 1_000, now=T0)
+    split(T0 + 86_400, 2.0)
+    change = ledger.apply_splits("AAPL")[0]
+    assert (change["shares_before"], change["shares_after"], change["cash_cents"]) == (-10, -20, 0)
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -20, "cost_basis_cents": -10_000}]
+
+
+def test_a_reverse_split_rounds_a_short_down_and_pays_the_fraction(put_bars):
+    put_bars("AAPL", [100.0], start=T0)
+    acc = account(100_000)
+    short(acc, 15, 1_000, now=T0 + 100)
+    split(T0 + 86_400, 0.1)
+    ledger.apply_splits("AAPL")
+    # 15 old shares short are 1.5 new ones: 2 are owed, and the extra half is paid at $100 as if sold short then
+    assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -2, "cost_basis_cents": -20_000}]
+    assert ledger.account(acc)["cash_balance_cents"] == 100_000 + 15_000 + 5_000
+
+
+def test_holdings_from_before_short_selling_survive_the_upgrade(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "v5.db")
+    with closing(sqlite3.connect(db.DB_PATH)) as conn:
+        for script in [(db.ROOT / "schema.sql").read_text(encoding="utf-8"), *db.UPGRADES[:4]]:
+            conn.executescript(script)
+        conn.execute("INSERT INTO accounts (name, starting_cash_cents, cash_balance_cents) VALUES ('Main', 100, 100)")
+        conn.execute("INSERT INTO positions VALUES (1, 'AAPL', 3, 3000)")
+        conn.commit()
+    db.init()
+    assert ledger.positions(1) == [{"symbol": "AAPL", "shares": 3, "cost_basis_cents": 3_000}]
+    assert ledger.place_order(1, "AAPL", "SELL", "LIMIT", 3, limit_cents=1_000, now=T0)["short"] == 0
+
+
+def test_a_reset_portfolio_keeps_its_short_as_a_record_without_buy_ins():
+    acc = account()
+    short(acc, 10, 1_000, now=T0)
+    fresh = ledger.reset_account(acc, now=T0 + 10)["id"]
+    assert ledger.match("AAPL", [bar(T0 + 60, 2_000)]) == []
+    assert ledger.positions(acc)[0]["shares"] == -10 and ledger.positions(fresh) == []
