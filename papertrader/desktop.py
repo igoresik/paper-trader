@@ -47,12 +47,13 @@ def _free_port():
         return probe.getsockname()[1]
 
 
-def _saved_size():
+def _saved_shape():
+    """The window's last normal size and whether it was maximized. A first start opens maximized."""
     try:
         saved = json.loads(STATE.read_text(encoding="utf-8"))
-        return max(1100, int(saved["width"])), max(700, int(saved["height"]))
+        return max(1100, int(saved["width"])), max(700, int(saved["height"])), saved.get("maximized") is not False
     except (OSError, ValueError, KeyError, TypeError):
-        return 1440, 900
+        return 1440, 900, True
 
 
 def main():
@@ -64,9 +65,23 @@ def main():
     if sys.stdout is None:  # a windowed exe has no console to print to
         sys.stdout = sys.stderr = open(db.DATA_DIR / "console.log", "w", encoding="utf-8")
 
-    width, height = _saved_size()
+    width, height, maximized = _saved_shape()
+    # a normal window fits on the main screen (Windows puts it at 0, 0) and starts in its middle
+    screen = next((s for s in webview.screens if s.x == 0 and s.y == 0), None)
+    if screen:
+        width, height = min(width, screen.width - 40), min(height, screen.height - 100)
     window = webview.create_window(NAME, html=LOADING, width=width, height=height, min_size=(1100, 700),
-                                   background_color="#15171C")
+                                   screen=screen, maximized=maximized, background_color="#15171C")
+    shape = {"width": width, "height": height, "maximized": maximized, "minimized": False}
+
+    def resized(width, height):  # the state events come first, so only a normal window's size is kept
+        if not shape["maximized"] and not shape["minimized"]:
+            shape.update(width=width, height=height)
+
+    window.events.maximized += lambda: shape.update(maximized=True, minimized=False)
+    window.events.minimized += lambda: shape.update(minimized=True)
+    window.events.restored += lambda: shape.update(maximized=False, minimized=False)
+    window.events.resized += resized
     engine = {}
 
     def start_engine():  # runs once the window is up
@@ -88,7 +103,7 @@ def main():
 
     def remember():
         try:
-            STATE.write_text(json.dumps({"width": window.width, "height": window.height}), encoding="utf-8")
+            STATE.write_text(json.dumps({k: shape[k] for k in ("width", "height", "maximized")}), encoding="utf-8")
         except OSError:
             pass
 
