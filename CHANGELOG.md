@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0 (2026-10-22)
+
+- Short selling: with no shares held, Sell becomes **Sell short**, and **Buy back** closes it. The sale's money plus half as much again is held as collateral, and if the price rises until that collateral is only 130% of the cost of buying back, the app buys the short back for you, even after it was closed.
+- Before it upgrades your data, the app saves a copy of the old database next to it.
+- The report card counts buy-backs as closed trades.
+- Behind the scenes: tests for the order ticket, signal card and report tiles, Dependabot watching the dependencies, a newer Pillow for the icon script, and a worker test that failed now and then fixed.
+
 ## 1.2.1 (2026-10-21)
 
 - A Buy or Sell call now also has to beat how often its direction came anyway on the days that moved. SPY went up on about 54% of them, so Buy calls that were right 55% of the time no longer show as a clear call.
