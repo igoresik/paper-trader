@@ -8,7 +8,7 @@ import { ReportTiles, Return } from "../components/ReportTiles";
 import { Button, cx, Empty, Input, Segmented } from "../components/ui";
 import { useDesk } from "../desk";
 import { api, type ChartPrefs, type OrderType, type ReplayState, type Side } from "../lib/api";
-import { marketDay, money, parseCents, price, shares } from "../lib/format";
+import { filled, held as heldShares, marketDay, money, parseCents, price, shares } from "../lib/format";
 
 const CASH = [1_000_000, 2_500_000, 10_000_000];
 const DAILY_RANGES = ["1m", "3m", "6m", "ytd", "1y", "5y", "all"];
@@ -120,7 +120,7 @@ function Session({ id, onClosed }: { id: number; onClosed: () => void }) {
       client.setQueryData(["replay", id], state);
       client.invalidateQueries({ queryKey: ["replays"] });
       for (const f of fills)
-        toast.success(`${f.buy_in ? "Bought back" : f.side === "BUY" ? "Bought" : "Sold"} ${shares(f.shares)} ${f.symbol} at ${money(f.price_cents)}`, {
+        toast.success(`${filled(f)} ${shares(f.shares)} ${f.symbol} at ${money(f.price_cents)}`, {
           description: f.buy_in ? `${marketDay(f.executed_at)}: forced buy-in, the collateral was down to 130%.` : marketDay(f.executed_at),
         });
     },
@@ -191,7 +191,7 @@ function Session({ id, onClosed }: { id: number; onClosed: () => void }) {
         <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-rule pt-3 text-[12px]">
           <dt className="text-ink-2">Value</dt><dd className="num text-right font-semibold">{money(p.total_value_cents)}</dd>
           <dt className="text-ink-2">Cash</dt><dd className="num text-right">{money(p.cash_cents)}</dd>
-          <dt className="text-ink-2">Shares</dt><dd className="num text-right">{held ? (held.shares < 0 ? `${shares(-held.shares)} short` : shares(held.shares)) : "0"}</dd>
+          <dt className="text-ink-2">Shares</dt><dd className="num text-right">{held ? heldShares(held.shares) : "0"}</dd>
           {held && <><dt className="text-ink-2">Average cost</dt><dd className="num text-right">{money(held.avg_cost_cents)}</dd></>}
           {held && <><dt className="text-ink-2">Unrealized</dt><dd className="text-right"><Return value={held.unrealized_pnl_cents / Math.abs(held.cost_basis_cents)} /></dd></>}
         </dl>

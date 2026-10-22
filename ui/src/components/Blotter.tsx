@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { useDesk } from "../desk";
 import { api, type Order, type Portfolio, type Position } from "../lib/api";
-import { dateTime, money, percent, price, shares } from "../lib/format";
+import { dateTime, held, money, percent, price, shares } from "../lib/format";
 import { useQuote } from "../lib/live";
 import { Button, Change, cx, Empty } from "./ui";
 
@@ -25,7 +25,7 @@ export function PositionRow({ p, total, onPick, wide }: { p: Position; total?: n
           {p.symbol}
         </button>
       </td>
-      <td className={cx(td, "num text-right")}>{p.shares < 0 ? `${shares(-p.shares)} short` : shares(p.shares)}</td>
+      <td className={cx(td, "num text-right")}>{held(p.shares)}</td>
       <td className={cx(td, "num text-right")}>{price(p.avg_cost_cents)}</td>
       <td className={cx(td, "num text-right")}>{price(last)}</td>
       <td className={cx(td, "num text-right")}>{money(value)}</td>
@@ -41,7 +41,7 @@ export function PositionRow({ p, total, onPick, wide }: { p: Position; total?: n
         <td className={cx(td, "w-36")}>
           <div className="flex items-center gap-2">
             <div className="h-1.5 flex-1 rounded-full bg-rule">
-              <div className="h-1.5 rounded-full bg-ink-2" style={{ width: `${(Math.abs(value) / total) * 100}%` }} />
+              <div className="h-1.5 rounded-full bg-ink-2" style={{ width: `${Math.min(1, Math.abs(value) / total) * 100}%` }} />
             </div>
             <span className="num w-10 text-right text-[11px] text-ink-2">{percent(Math.abs(value) / total, { digits: 0 })}</span>
           </div>
