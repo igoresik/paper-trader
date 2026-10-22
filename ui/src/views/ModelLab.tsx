@@ -211,14 +211,23 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
   const best = Math.max(s.majority.balanced_accuracy, s.always_buy.balanced_accuracy, s.yesterday.balanced_accuracy);
   const bt = m.backtest;
   const curve = bt.curve;
-  const lines = useMemo(() => (curve ? [
-    { label: "Follow the model", color: "--buy", values: curve.strategy },
-    { label: "Buy and hold", color: "--ink-3", values: curve.buy_hold },
-    ...(curve.sized && curve.steady ? [
-      { label: "Sized by its lean", color: "--ma2", values: curve.sized },
-      { label: "Same size, always", color: "--ma1", values: curve.steady },
-    ] : []),
-  ] : []), [curve]);
+  // one strategy at a time, each next to holding its own average size, so the chart stays readable
+  const [pick, setPick] = useState<"calls" | "lean" | "calm">("calls");
+  const views = [
+    { value: "calls" as const, label: "Its calls" },
+    ...(bt.sized && bt.steady && curve?.sized && curve.steady ? [{ value: "lean" as const, label: "Sized by its lean" }] : []),
+    ...(bt.calm && bt.calm_steady && curve?.calm && curve.calm_steady ? [{ value: "calm" as const, label: "Calm before big moves" }] : []),
+  ];
+  const view = views.some((v) => v.value === pick) ? pick : "calls";
+  const lines = useMemo(() => {
+    if (!curve) return [];
+    const hold = { label: "Buy and hold", color: "--ink-3", values: curve.buy_hold };
+    if (view === "lean") return [{ label: "Sized by its lean", color: "--ma2", values: curve.sized! }, { label: "Same size, always", color: "--ma1", values: curve.steady! }, hold];
+    if (view === "calm") return [{ label: "Calm before big moves", color: "--osc", values: curve.calm! }, { label: "Same size, always", color: "--ma1", values: curve.calm_steady! }, hold];
+    return [{ label: "Follow the model", color: "--buy", values: curve.strategy }, hold];
+  }, [curve, view]);
+  const [mine, base, against] =
+    view === "lean" ? [bt.sized!, bt.steady!, "the same size"] : view === "calm" ? [bt.calm!, bt.calm_steady!, "the same size"] : [bt.strategy, bt.buy_hold, "buy and hold"];
   const overfit = (m.folds ?? []).some((f) => f.train_balanced_accuracy - f.balanced_accuracy > 0.15);
   const kept = run.params.prune ? m.folds?.at(-1)?.inputs : undefined;
 
@@ -268,6 +277,13 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
             {percent(bt.steady.total_return, { sign: true, digits: 1 })} (Sharpe {bt.steady.sharpe.toFixed(2)}) for holding its average {pct(bt.sized_exposure, 0)} all the time. The gap between the two is what sizing adds beyond being in the market.
           </p>
         )}
+        {bt.calm && bt.calm_steady && bt.calm_exposure != null && (
+          <p>
+            <b className="font-semibold">Calm before big moves:</b> holding between half and all of the money, less when the move reading saw a bigger move than usual coming, returned{" "}
+            {percent(bt.calm.total_return, { sign: true, digits: 1 })} (Sharpe {bt.calm.sharpe.toFixed(2)}, worst drop {pct(bt.calm.max_drawdown)}) against{" "}
+            {percent(bt.calm_steady.total_return, { sign: true, digits: 1 })} (Sharpe {bt.calm_steady.sharpe.toFixed(2)}, worst drop {pct(bt.calm_steady.max_drawdown)}) for holding its average {pct(bt.calm_exposure, 0)} all the time. Big moves go both ways, so stepping back before them only helps if they are more often falls.
+          </p>
+        )}
         {overfit && (
           <p className="flex items-start gap-1.5 text-[13px] text-warn">
             <CircleAlert className="mt-0.5 size-4 shrink-0" /> It scores much better on its training data than on new data: it is memorising. Try shallower trees or more bars per leaf.
@@ -277,13 +293,22 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
 
       {curve && (
         <section>
-          <h3 className="mb-2 text-[13px] font-semibold">Growth of $100, out of sample</h3>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-[13px] font-semibold">Growth of $100, out of sample</h3>
+            {views.length > 1 && <Segmented size="sm" label="Strategy" value={view} onChange={setPick} options={views} />}
+          </div>
           <LineChart t={curve.t} lines={lines} theme={theme} height={220} />
           <div className="mt-2 grid grid-cols-2 gap-x-8 text-[12px] text-ink-2 sm:grid-cols-4">
-            <span>Sharpe <b className="num text-ink">{bt.strategy.sharpe.toFixed(2)}</b> vs <b className="num text-ink">{bt.buy_hold.sharpe.toFixed(2)}</b></span>
-            <span>Worst drop <b className="num text-ink">{pct(bt.strategy.max_drawdown)}</b> vs <b className="num text-ink">{pct(bt.buy_hold.max_drawdown)}</b></span>
-            <span>In the market <b className="num text-ink">{pct(bt.exposure, 0)}</b> of the time</span>
-            <span><b className="num text-ink">{bt.trades}</b> trades{bt.hit_rate != null ? <>, <b className="num text-ink">{pct(bt.hit_rate, 0)}</b> of buy days went up</> : null}</span>
+            <span>Sharpe <b className="num text-ink">{mine.sharpe.toFixed(2)}</b> vs <b className="num text-ink">{base.sharpe.toFixed(2)}</b> for {against}</span>
+            <span>Worst drop <b className="num text-ink">{pct(mine.max_drawdown)}</b> vs <b className="num text-ink">{pct(base.max_drawdown)}</b></span>
+            {view === "calls" ? (
+              <>
+                <span>In the market <b className="num text-ink">{pct(bt.exposure, 0)}</b> of the time</span>
+                <span><b className="num text-ink">{bt.trades}</b> trades{bt.hit_rate != null ? <>, <b className="num text-ink">{pct(bt.hit_rate, 0)}</b> of buy days went up</> : null}</span>
+              </>
+            ) : (
+              <span>Holds <b className="num text-ink">{pct((view === "lean" ? bt.sized_exposure : bt.calm_exposure) ?? 0, 0)}</b> of the money on average</span>
+            )}
           </div>
         </section>
       )}
