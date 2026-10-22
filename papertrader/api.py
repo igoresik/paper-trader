@@ -50,6 +50,7 @@ class MarketOrderIn(BaseModel):
     symbol: str
     side: Side
     shares: Shares
+    short: bool = False  # a sell may open or add to a short; without it a sell only sells shares held
 
 
 class OrderIn(MarketOrderIn):
@@ -76,6 +77,7 @@ class ReplayOrderIn(BaseModel):
     side: Literal["BUY", "SELL"]
     type: Literal["MARKET", "LIMIT", "STOP"]
     shares: Annotated[int, Field(ge=1)]
+    short: bool = False
     limit_cents: Annotated[int, Field(gt=0)] | None = None
     stop_cents: Annotated[int, Field(gt=0)] | None = None
 
@@ -330,7 +332,7 @@ def create_app(run_worker=True):
     @app.post("/replays/{account_id}/orders", status_code=201, tags=["replay"])
     def replay_order(account_id: int, body: ReplayOrderIn):
         """Placed after the day's close: a market order fills at the next open, limits and stops when reached."""
-        return replay.order(account_id, body.side, body.type, body.shares, body.limit_cents, body.stop_cents)
+        return replay.order(account_id, body.side, body.type, body.shares, body.limit_cents, body.stop_cents, body.short)
 
     @app.post("/replays/{account_id}/step", tags=["replay"])
     def replay_step(account_id: int, body: StepIn):
@@ -396,12 +398,13 @@ def create_app(run_worker=True):
             if last is None:
                 raise market.MarketError(f"There is no price for {symbol} yet. Try again in a moment.")
             order = ledger.place_order(body.account_id, symbol, body.side, "MARKET", body.shares,
-                                       ref_price_cents=last, costs=costs)
+                                       ref_price_cents=last, costs=costs, short=body.short)
             worker.orders_changed()
             worker.watch(symbol)
             hub.publish({"type": "order", **order})
             return JSONResponse({**order, "queued": True}, status_code=202)
-        receipt = ledger.execute_market(body.account_id, symbol, body.side, body.shares, price, costs)
+        receipt = ledger.execute_market(body.account_id, symbol, body.side, body.shares, price, costs, short=body.short)
+        worker.orders_changed()  # a short now open needs its buy-in watched
         worker.watch(symbol)
         hub.publish({"type": "fill", **receipt})
         return {**receipt, "practice": practice}
@@ -413,7 +416,8 @@ def create_app(run_worker=True):
         ledger.live_only(body.account_id)
         worker.check_splits(symbol)
         order = ledger.place_order(body.account_id, symbol, body.side, body.type, body.shares, body.limit_cents,
-                                   body.stop_cents, ref_price_cents=worker.price(symbol), costs=settings.costs())
+                                   body.stop_cents, ref_price_cents=worker.price(symbol), costs=settings.costs(),
+                                   short=body.short)
         worker.orders_changed()
         worker.watch(symbol)
         hub.publish({"type": "order", **order})
