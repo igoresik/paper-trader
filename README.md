@@ -25,6 +25,7 @@ Good to know:
   - Orders placed while the market is closed wait for the next open, as they would at a broker.
   - Practice mode fills them at once at the last price instead.
   - Limit and stop orders fill even if the app was closed when their price came: the app replays the minutes it missed.
+- **Short selling:** bet on a price falling. With no shares held, the ticket's Sell becomes **Sell short**, and a short is closed with **Buy back**. As US margin rules ask, the sale's money stays as collateral with half as much again from your cash. If the price rises until that collateral is only 130% of what buying back costs, the app buys the short back for you, at that price or at the open after a jump, even if the app was closed. One order never goes from long to short or back.
 - **Costs:** a commission per order, a commission as a percentage of the order, and slippage. Every rounding goes against you, so the paper ledger can never create money.
 - **Charts:**
   - Six chart types, and linear, log or percent scales.
@@ -33,7 +34,7 @@ Good to know:
   - Your fills, your average cost and your open orders, drawn on the chart.
   - Every choice is remembered.
 - **Portfolios:** several of them. A reset keeps the old one as a read-only record. Positions show live profit and loss, the equity curve is compared with SPY, and the trade ledger can be paged, filtered and exported to CSV.
-- **Report card:** the honest test the model gets, applied to you: how many sales made money, average win and loss, your biggest drop, what commission and slippage cost you, how often you were in the market, and how SPY and SPY's model did over the same days.
+- **Report card:** the honest test the model gets, applied to you: how many closed trades (sales and buy-backs) made money, average win and loss, your biggest drop, what commission and slippage cost you, how often you were in the market, and how SPY and SPY's model did over the same days.
 - **Replay:** trade a symbol's past one day at a time, seeing only the days up to the replay's date. A year takes an afternoon instead of a year, and the report card compares you with buying and holding and with the model's out-of-sample calls for the same days.
 - **Model lab:** change how the model works and test it the honest way, then pick which test drives the live signal.
 - **Stock splits:** held shares, open orders and the model's record move to the new share count. A reverse split that leaves part of a share pays that part out in cash.
@@ -134,7 +135,7 @@ The API is documented at http://127.0.0.1:8000/docs.
 ## Data
 
 - Money is stored in whole cents and shares as whole numbers, so no amount goes through floating point.
-- Every write runs in a `BEGIN IMMEDIATE` transaction. Two orders can't both spend the same cash, and `CHECK` constraints make negative cash or shares impossible even if the code had a bug.
+- Every write runs in a `BEGIN IMMEDIATE` transaction. Two orders can't both spend the same cash, and a `CHECK` constraint makes negative cash impossible even if the code had a bug. Shares only go below zero as a short.
 - The `trades` table is the audit log. Database triggers refuse any change or deletion.
 - A position keeps its total cost, not a rounded average, so selling part of it never leaves a few cents behind.
 - Bars are split-adjusted, as brokers chart them, and are downloaded again when stale, because Yahoo re-adjusts old bars after a split. Only complete bars are stored.
