@@ -172,6 +172,12 @@ flowchart LR
 
 A price from Yahoo's stream reaches the worker, which fills any waiting order it triggers, each fill in one transaction, and pushes the quote and the fill to every open window over `/ws`. The UI never talks to Yahoo or the database itself.
 
+### Design decisions
+
+- **SQLite in one process, not PostgreSQL and services.** It's a single-user desktop app, so the API, worker and model are modules of one process and the database is one file: nothing to install, start or secure. `BEGIN IMMEDIATE` takes the write lock before anything is read, so two orders can't both spend the same cash, and WAL mode keeps readers from waiting on a writer.
+- **Whole cents, not floats.** In binary floating point (IEEE 754) `0.1 + 0.2` isn't `0.3`, and a ledger that drifts by a cent can't be trusted. Money is stored as integers, a position keeps its total cost rather than a rounded average, and every rounding goes against you, so the ledger can never create money.
+- **A cash account, never borrowed money.** A `CHECK` constraint keeps cash at zero or above, so there are no margin loans or interest to model. Short selling (since 1.3) keeps the same rule: the sale's money and half as much again are held as collateral, and a forced buy-back only ever spends cash the account has.
+
 ## Layout
 
 | Path | What it does |
