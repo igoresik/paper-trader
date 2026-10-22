@@ -71,6 +71,7 @@ def test_backtest_charges_costs_on_each_change_of_position():
                           close, Params(cost_bps=0))
     assert (flip["trades"], flip["exposure"]) == (2, 0.5)
     assert flip["curve"]["t"] == [1, 2, 3, 4]  # each return lands on the bar it was earned by
+    assert "calm" not in free  # no move readings, no calm sizing
 
 
 def test_track_record_counts_hits_by_confidence_band():
@@ -237,6 +238,23 @@ def test_sizing_is_scored_against_holding_its_average_size_all_the_time():
     assert len(bt["curve"]["sized"]) == len(bt["curve"]["steady"]) == 199
 
 
+def test_calm_holds_less_the_likelier_a_big_move_looks():
+    calm = model.calm_sizes(pd.Series(np.linspace(0.3, 0.7, 300)))
+    assert (calm[:59] == 0.75).all()  # too few earlier readings to rank against
+    assert calm[-1] == 0.5 and calm.max() <= 1.0  # always the likeliest big move so far: half out
+
+
+def test_calm_sizing_is_scored_against_holding_its_average_size_all_the_time():
+    rets = np.tile([0.01, -0.02], 100)  # a quiet rise, then a big drop the move reading sees coming
+    close = pd.Series(100 * np.cumprod(np.r_[1, 1 + rets[:-1]]), index=range(200))
+    oos = pd.DataFrame({"pred": 1, "p_buy": 0.4, "p_sell": 0.3}, index=range(199))
+    move_oos = pd.DataFrame({"p_buy": np.tile([0.7, 0.3], 99)}, index=range(1, 199))  # its blocks start a bar later
+    bt = model.backtest(oos, close, Params(cost_bps=0), move_oos)
+    assert bt["calm_exposure"] < 0.9
+    assert bt["calm"]["total_return"] > bt["calm_steady"]["total_return"]
+    assert len(bt["curve"]["calm"]) == len(bt["curve"]["calm_steady"]) == 199
+
+
 def test_barrier_calls_on_a_random_walk_show_no_edge(put_bars):
     put_bars("SPY", *random_walk())
     metrics = model.validate("SPY", Params(trees=40, max_depth=2, horizon=5))["metrics"]
@@ -244,6 +262,7 @@ def test_barrier_calls_on_a_random_walk_show_no_edge(put_bars):
     for earlier, later in zip(folds, folds[1:]):  # 4 rows left out before each test block, whose labels reach into it
         assert later["train_rows"] == earlier["train_rows"] + earlier["test_rows"]
     assert metrics["summary"]["verdict"] != "better than the baselines"
+    assert {"calm", "calm_steady", "calm_exposure"} <= metrics["backtest"].keys()
     # yesterday's label is one already known, not the one 4 days into the future
     assert metrics["folds"][-1]["baselines"]["yesterday"] < 0.6
 
