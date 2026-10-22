@@ -16,6 +16,9 @@ A Windows desktop app for practising trades with fake money on real US market pr
 
 ## Download (Windows)
 
+> [!TIP]
+> **On macOS or Linux?** The installer is Windows-only, but the same app runs in your browser with [Docker](#docker): `docker compose up --build`, then open http://localhost:8000. You can also [run it from source](#run-from-source).
+
 1. Get `PaperTrader-Setup-<version>.exe` from the repository's **Releases** page.
 2. Run it. It installs for your Windows user only (no admin prompt) and adds Paper Trader to the Start menu. You can tick a desktop shortcut too.
 3. Open Paper Trader, name your paper account, pick your starting cash and a few symbols to watch.
