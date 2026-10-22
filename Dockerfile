@@ -1,6 +1,6 @@
 # The same app without the desktop window: the API and the UI in a browser at http://localhost:8000
 
-FROM node:24-slim AS ui
+FROM node:25-slim AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
