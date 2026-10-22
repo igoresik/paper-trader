@@ -139,7 +139,7 @@ The API is documented at http://127.0.0.1:8000/docs.
 - A position keeps its total cost, not a rounded average, so selling part of it never leaves a few cents behind.
 - Bars are split-adjusted, as brokers chart them, and are downloaded again when stale, because Yahoo re-adjusts old bars after a split. Only complete bars are stored.
 - Splits are kept with the day they took effect, so old fills and old signals can be put on today's share count.
-- A newer version upgrades the database one numbered step at a time, so an installed copy keeps its data.
+- A newer version upgrades the database one numbered step at a time, so an installed copy keeps its data. Before the first step it saves a copy of the old database next to it (`papertrader-v<old version>-backup.db`).
 - When Yahoo Finance stops answering, a banner says so. Waiting orders stay in place and fill once prices come back.
 
 ## Safety
