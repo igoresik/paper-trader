@@ -99,17 +99,38 @@ So the model can't tell which way SPY goes next: 52% is barely better than tossi
 
 ## Run from source
 
+Needs **Python 3.12 or newer** (CI runs 3.14) and **Node.js 22.22+ or 24.15+** (what the UI's build and test tools ask for).
+
+First make a virtual environment and switch it on.
+
+Windows (PowerShell):
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
-py -3.14 -m venv .venv
-.venv\Scripts\pip install -r requirements-dev.txt
+
+macOS / Linux:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Then, the same everywhere:
+
+```sh
+python -m pip install -r requirements-dev.txt
 cd ui
 npm ci
 npm run build
 cd ..
-.venv\Scripts\python -m papertrader serve
+python -m papertrader serve
 ```
 
-Then open http://127.0.0.1:8000, or run `.venv\Scripts\python launcher.py` for the desktop window. For UI work with instant reload, keep `serve` running and start `npm run dev` in `ui/`.
+Then open http://127.0.0.1:8000. On Windows, `python launcher.py` opens the desktop window instead. For UI work with instant reload, keep `serve` running and start `npm run dev` in `ui/`.
+
+If PowerShell won't run `Activate.ps1`, use `.venv\Scripts\activate.bat` from Command Prompt instead. Data from a source run is kept in `data/` in the repository folder, which git ignores.
 
 Command line:
 
@@ -167,8 +188,10 @@ The API is documented at http://127.0.0.1:8000/docs.
 
 ## Tests
 
-```
-.venv\Scripts\python -m pytest
+With the virtual environment switched on:
+
+```sh
+python -m pytest
 cd ui
 npm test
 ```
