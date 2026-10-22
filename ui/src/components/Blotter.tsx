@@ -25,7 +25,7 @@ export function PositionRow({ p, total, onPick, wide }: { p: Position; total?: n
           {p.symbol}
         </button>
       </td>
-      <td className={cx(td, "num text-right")}>{shares(p.shares)}</td>
+      <td className={cx(td, "num text-right")}>{p.shares < 0 ? `${shares(-p.shares)} short` : shares(p.shares)}</td>
       <td className={cx(td, "num text-right")}>{price(p.avg_cost_cents)}</td>
       <td className={cx(td, "num text-right")}>{price(last)}</td>
       <td className={cx(td, "num text-right")}>{money(value)}</td>
@@ -34,23 +34,29 @@ export function PositionRow({ p, total, onPick, wide }: { p: Position; total?: n
       </td>
       <td className={cx(td, "text-right")}>
         <Change cents={unrealized}>
-          {money(unrealized, { sign: true })} <span className="text-[11px]">{percent(unrealized / p.cost_basis_cents, { sign: true, digits: 1 })}</span>
+          {money(unrealized, { sign: true })} <span className="text-[11px]">{percent(unrealized / Math.abs(p.cost_basis_cents), { sign: true, digits: 1 })}</span>
         </Change>
       </td>
       {wide && total ? (
         <td className={cx(td, "w-36")}>
           <div className="flex items-center gap-2">
             <div className="h-1.5 flex-1 rounded-full bg-rule">
-              <div className="h-1.5 rounded-full bg-ink-2" style={{ width: `${(value / total) * 100}%` }} />
+              <div className="h-1.5 rounded-full bg-ink-2" style={{ width: `${(Math.abs(value) / total) * 100}%` }} />
             </div>
-            <span className="num w-10 text-right text-[11px] text-ink-2">{percent(value / total, { digits: 0 })}</span>
+            <span className="num w-10 text-right text-[11px] text-ink-2">{percent(Math.abs(value) / total, { digits: 0 })}</span>
           </div>
         </td>
       ) : null}
       <td className={cx(td, "text-right")}>
-        <Button tone="quiet" className="h-6 px-2 text-xs" onClick={() => trade(p.symbol, "SELL", p.shares)}>
-          Sell
-        </Button>
+        {p.shares < 0 ? (
+          <Button tone="quiet" className="h-6 px-2 text-xs" onClick={() => trade(p.symbol, "BUY", -p.shares)}>
+            Buy back
+          </Button>
+        ) : (
+          <Button tone="quiet" className="h-6 px-2 text-xs" onClick={() => trade(p.symbol, "SELL", p.shares)}>
+            Sell
+          </Button>
+        )}
       </td>
     </tr>
   );
