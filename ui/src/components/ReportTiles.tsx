@@ -29,10 +29,10 @@ function Tile({ label, children, note }: { label: string; children: ReactNode; n
 export function ReportTiles({ r, model }: { r: ReportBase; model: { label: string; note: (days: number) => string; none: string } }) {
   return (
     <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-      <Tile label="Sales that made money" note={r.sells ? `${r.wins} of ${r.sells} sales` : "Shows up after your first sale"}>
+      <Tile label="Closed trades that made money" note={r.sells ? `${r.wins} of ${r.sells} sales and buy-backs` : "Shows up after you first sell or buy back"}>
         {r.sells ? percent(r.wins / r.sells, { digits: 0 }) : "–"}
       </Tile>
-      <Tile label="Average win and loss" note="per sale, after costs">
+      <Tile label="Average win and loss" note="per closed trade, after costs">
         {r.avg_win_cents == null && r.avg_loss_cents == null ? "–" : (
           <>
             <Signed value={r.avg_win_cents}>{r.avg_win_cents == null ? "–" : money(r.avg_win_cents, { sign: true })}</Signed>
