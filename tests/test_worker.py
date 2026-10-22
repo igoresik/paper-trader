@@ -1,10 +1,18 @@
 import threading
 import time
 
+import pytest
+
 from papertrader import db, ledger, market
 from papertrader.worker import Worker
 
 OPEN = 1_792_416_600  # Monday 2026-10-19, 09:30 New York
+
+
+@pytest.fixture(autouse=True)
+def no_yahoo(monkeypatch):
+    # during real market hours the matcher checks splits first, and a slow Yahoo held fills past wait_for
+    monkeypatch.setattr(market, "check_splits", lambda symbol: None)
 
 
 def worker_with_minutes(count):
