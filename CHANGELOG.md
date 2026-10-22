@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1 (2026-10-22)
+
+- The window opens maximized, or, if you last closed it smaller, centered on the screen at a size that fits. It used to open off to the side.
+
 ## 1.3.0 (2026-10-22)
 
 - Short selling: with no shares held, Sell becomes **Sell short**, and **Buy back** closes it. The sale's money plus half as much again is held as collateral, and if the price rises until that collateral is only 130% of the cost of buying back, the app buys the short back for you, even after it was closed.
