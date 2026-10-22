@@ -269,9 +269,11 @@ def _check_cover(conn, account_id, symbol, owned, wanted, skip_order=None):
         raise NotEnoughShares(f"You're short {-owned} {symbol}, so you can buy back up to {-owned - held}.{note}")
 
 
-def _check_short(owned, symbol):
+def _check_short(owned, symbol, proceeds):
     if owned > 0:
         raise NotEnoughShares(f"You own {owned} {symbol}: sell those before selling short.")
+    if proceeds <= 0:  # a short's basis is minus what it brought in, so it has to bring something in
+        raise LedgerError("This short sale wouldn't cover its commission.")
 
 
 # orders
@@ -316,7 +318,7 @@ def _fill(conn, order, price_cents, now, costs, slip, forced=False):
         if side == "BUY":
             _check_cash(conn, acct, symbol, total, order["id"])
         else:
-            _check_short(owned, symbol)
+            _check_short(owned, symbol, total)
             _check_cash(conn, acct, symbol, _short_margin(basis, total), order["id"], short=True)
         removed, realized = cash_change, None
     if acct["cash_balance_cents"] + cash_change < 0:
@@ -387,8 +389,8 @@ def place_order(
             reserved = max(0, reserved)
             _check_cash(conn, acct, symbol, reserved)
         elif short:
-            _check_short(owned, symbol)
             proceeds = fill_terms("SELL", shares, estimate, costs, slip=kind != "LIMIT")[2]
+            _check_short(owned, symbol, proceeds)
             reserved = max(0, _short_margin(basis, proceeds))
             _check_cash(conn, acct, symbol, reserved, short=True)
         else:
@@ -446,48 +448,63 @@ def _reject(order, reason, now):
 def match(symbol, bars, costs=Costs(), account_id=None):
     """Fill the symbol's open orders and buy-ins against bars (oldest first), booking fills in the order they
     happened. Live prices only reach live portfolios; a replay passes its own account_id with the day it moves to."""
-    hits = []
     whose = ("a.id = ?", (symbol, account_id)) if account_id else ("a.replay_at IS NULL", (symbol,))
-    for order in db.query("SELECT o.* FROM orders o JOIN accounts a ON a.id = o.account_id"
-                          f" WHERE o.symbol = ? AND o.status = 'OPEN' AND {whose[0]}", whose[1]):
-        for bar in bars:
-            # a bar that began before the order existed may have traded before it, so it doesn't count
-            if bar["ts"] >= order["created_at"] and (price := trigger_price(order, bar)) is not None:
-                hits.append((bar["ts"], order["id"], order, price))
-                break
-    # a short is bought back like a buy stop at its buy-in price, from the bar after it last changed
-    for pos in db.query("SELECT p.*, (SELECT MAX(executed_at) FROM trades t WHERE t.account_id = p.account_id"
-                        " AND t.symbol = p.symbol) AS since FROM positions p JOIN accounts a ON a.id = p.account_id"
-                        f" WHERE p.symbol = ? AND p.shares < 0 AND a.archived_at IS NULL AND {whose[0]}", whose[1]):
-        stop = {"side": "BUY", "type": "STOP", "stop_cents": buy_in_price(pos["shares"], pos["cost_basis_cents"])}
-        for bar in bars:
-            if bar["ts"] >= (pos["since"] or 0) and (price := trigger_price(stop, bar)) is not None:
-                hits.append((bar["ts"], 0, pos, price))
-                break
-    events = []
-    for ts, order_id, order, price in sorted(hits, key=lambda hit: hit[:2]):
+    events, tried, wait = [], set(), {}  # orders booked or refused; account -> first bar its buy-in may use
+    while hit := _next_hit(bars, whose, tried, wait):
+        ts, order_id, order, price = hit
+        if not order_id:
+            event = _buy_in(order, price, ts, costs)
+            # a partial buy-in left nothing to pay for more, so later bars can't buy back more either
+            wait[order["account_id"]] = ts + 1 if event else math.inf
+            events += [event] if event else []
+            continue
+        tried.add(order_id)
         try:
-            if not order_id:
-                if event := _buy_in(order, price, ts, costs):
-                    events.append(event)
-                continue
             with db.tx() as conn:
                 events.append(_fill(conn, order, price, ts, costs, slip=order["type"] != "LIMIT"))
         except Conflict:
             continue  # cancelled, or filled by another run meanwhile
         except LedgerError as refused:
-            if order_id and (event := _reject(order, str(refused), ts)):
+            if event := _reject(order, str(refused), ts):
                 events.append(event)
     return events
 
 
+def _next_hit(bars, whose, tried, wait):
+    """The earliest fill still to book: an open order reaching its price, or a short its buy-in price, which is
+    a buy stop. Read again after every fill, since a fill can open, grow or close a short."""
+    hits = []
+    for order in db.query("SELECT o.* FROM orders o JOIN accounts a ON a.id = o.account_id"
+                          f" WHERE o.symbol = ? AND o.status = 'OPEN' AND {whose[0]}", whose[1]):
+        if order["id"] in tried:
+            continue
+        for bar in bars:
+            # a bar that began before the order existed may have traded before it, so it doesn't count
+            if bar["ts"] >= order["created_at"] and (price := trigger_price(order, bar)) is not None:
+                hits.append((bar["ts"], order["id"], order, price))
+                break
+    for pos in db.query("SELECT p.*, (SELECT MAX(executed_at) FROM trades t WHERE t.account_id = p.account_id"
+                        " AND t.symbol = p.symbol) AS since FROM positions p JOIN accounts a ON a.id = p.account_id"
+                        f" WHERE p.symbol = ? AND p.shares < 0 AND a.archived_at IS NULL AND {whose[0]}", whose[1]):
+        stop = {"side": "BUY", "type": "STOP", "stop_cents": buy_in_price(pos["shares"], pos["cost_basis_cents"])}
+        start = max(pos["since"] or 0, wait.get(pos["account_id"], 0))
+        for bar in bars:
+            if bar["ts"] >= start and (price := trigger_price(stop, bar)) is not None:
+                hits.append((bar["ts"], 0, pos, price))
+                break
+    return min(hits, key=lambda hit: hit[:2], default=None)
+
+
 def _buy_in(pos, price, now, costs):
-    """Buy back a short whose collateral fell to 130% of what buying it back costs, cancelling its open buys.
-    If a jump took the price past what the cash can pay, it buys back as many shares as the cash allows."""
+    """Buy back a short whose collateral fell to 130% of what buying it back costs, cancelling the open orders
+    that would buy it back or add to it. If a jump took the price past what the cash can pay, it buys back
+    as many shares as the cash allows."""
+    if account(pos["account_id"])["cash_balance_cents"] < fill_terms("BUY", 1, price, costs)[2]:
+        return None  # not even one share, so don't take the write lock on every tick to find that out
     with db.tx() as conn:
-        owned, basis = _owned(conn, pos["account_id"], pos["symbol"])
-        if owned >= 0 or price < buy_in_price(owned, basis):
-            return None  # bought back or changed since the bar was picked
+        owned, _ = _owned(conn, pos["account_id"], pos["symbol"])
+        if owned >= 0:
+            return None
         cash = _live_account(conn, pos["account_id"])["cash_balance_cents"]
         shares = min(-owned, cash // fill_terms("BUY", 1, price, costs)[0])
         while shares and fill_terms("BUY", shares, price, costs)[2] > cash:
@@ -495,7 +512,7 @@ def _buy_in(pos, price, now, costs):
         if not shares:
             return None
         conn.execute("UPDATE orders SET status = 'CANCELLED', reason = 'The forced buy-in bought the short back.',"
-                     " closed_at = ? WHERE account_id = ? AND symbol = ? AND side = 'BUY' AND status = 'OPEN'",
+                     " closed_at = ? WHERE account_id = ? AND symbol = ? AND (side = 'BUY' OR short) AND status = 'OPEN'",
                      (now, pos["account_id"], pos["symbol"]))
         reason = f"Forced buy-in: at {money(price)} the collateral was down to 130% of the cost of buying back."
         order = _new_order(conn, pos["account_id"], pos["symbol"], "BUY", "MARKET", shares, None, None, 0, now,

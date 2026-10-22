@@ -469,6 +469,7 @@ def test_a_buy_in_past_what_the_cash_can_pay_buys_back_what_it_can():
     assert ledger.match("AAPL", [bar(T0 + 60, 2_000)])[0]["shares"] == 7
     assert ledger.positions(acc) == [{"symbol": "AAPL", "shares": -3, "cost_basis_cents": -3_000}]
     assert ledger.account(acc)["cash_balance_cents"] == 1_000
+    assert ledger.match("AAPL", [bar(T0 + 120, 2_500)]) == []  # not a share more it can pay for
 
 
 def test_a_buy_in_cancels_open_buys_of_that_symbol():
@@ -542,3 +543,34 @@ def test_a_reset_portfolio_keeps_its_short_as_a_record_without_buy_ins():
     fresh = ledger.reset_account(acc, now=T0 + 10)["id"]
     assert ledger.match("AAPL", [bar(T0 + 60, 2_000)]) == []
     assert ledger.positions(acc)[0]["shares"] == -10 and ledger.positions(fresh) == []
+
+
+def test_a_short_opened_during_catch_up_is_bought_back_later_in_the_same_bars():
+    acc = account(100_000)
+    ledger.place_order(acc, "AAPL", "SELL", "MARKET", 10, ref_price_cents=1_000, now=T0, short=True)
+    events = ledger.match("AAPL", [bar(T0 + 60, 1_000), bar(T0 + 120, 1_400)])
+    assert [(e["side"], e["price_cents"], e.get("buy_in", False)) for e in events] == [("SELL", 1_000, False), ("BUY", 1_400, True)]
+    assert ledger.positions(acc) == []
+
+
+def test_a_short_sale_that_would_not_cover_its_commission_is_refused():
+    acc = account()
+    with pytest.raises(ledger.LedgerError, match="wouldn't cover its"):
+        short(acc, 1, 50, costs=Costs(commission_cents=100))
+    with pytest.raises(ledger.LedgerError, match="wouldn't cover its"):
+        ledger.place_order(acc, "AAPL", "SELL", "LIMIT", 1, limit_cents=50, costs=Costs(commission_cents=100), now=T0, short=True)
+
+
+def test_a_buy_in_cancels_open_short_sales_too():
+    acc = account()
+    short(acc, 10, 1_000, now=T0)
+    order = ledger.place_order(acc, "AAPL", "SELL", "LIMIT", 5, limit_cents=1_300, now=T0, short=True)
+    ledger.match("AAPL", [bar(T0 + 60, 1_200, 1_400)])
+    assert ledger.positions(acc) == []
+    assert ledger.orders(acc, "CANCELLED")[0]["id"] == order["id"]
+
+
+def test_the_database_refuses_a_basis_on_the_wrong_side_of_zero():
+    acc = account()
+    with pytest.raises(sqlite3.IntegrityError), db.tx() as conn:
+        conn.execute("INSERT INTO positions VALUES (?, 'AAPL', -1, 50)", (acc,))
