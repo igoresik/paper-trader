@@ -25,7 +25,7 @@ Good to know:
   - Orders placed while the market is closed wait for the next open, as they would at a broker.
   - Practice mode fills them at once at the last price instead.
   - Limit and stop orders fill even if the app was closed when their price came: the app replays the minutes it missed.
-- **Short selling:** bet on a price falling. With no shares held, the ticket's Sell becomes **Sell short**, and a short is closed with **Buy back**. As US margin rules ask, the sale's money stays as collateral with half as much again from your cash. If the price rises until that collateral is only 130% of what buying back costs, the app buys the short back for you, at that price or at the open after a jump, even if the app was closed. One order never goes from long to short or back.
+- **Short selling:** bet on a price falling. With no shares held, the ticket's Sell becomes **Sell short**, and a short is closed with **Buy back**. As US margin rules ask, the sale's money stays as collateral with half as much again from your cash. If the price rises until that collateral is only 130% of what buying back costs, the app buys the short back for you, at that price or at the open after a jump, even if the app was closed. A jump too big for your cash buys back as many shares as it can pay for. One order never goes from long to short or back.
 - **Costs:** a commission per order, a commission as a percentage of the order, and slippage. Every rounding goes against you, so the paper ledger can never create money.
 - **Charts:**
   - Six chart types, and linear, log or percent scales.
