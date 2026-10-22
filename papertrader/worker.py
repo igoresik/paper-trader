@@ -210,7 +210,8 @@ class Worker:
             "SELECT MIN(t) AS t FROM (SELECT created_at AS t FROM orders WHERE symbol = ? AND status = 'OPEN'"
             " AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
             " UNION ALL SELECT MAX(executed_at) FROM trades WHERE symbol = ? AND account_id IN"
-            " (SELECT account_id FROM positions WHERE symbol = ? AND shares < 0) GROUP BY account_id)",
+            " (SELECT account_id FROM positions WHERE symbol = ? AND shares < 0) AND account_id IN"
+            " (SELECT id FROM accounts WHERE replay_at IS NULL AND archived_at IS NULL) GROUP BY account_id)",
             (symbol, symbol, symbol))[0]["t"]
         daily = db.query(
             "SELECT ts, open_cents AS open, high_cents AS high, low_cents AS low, close_cents AS close FROM bars"
