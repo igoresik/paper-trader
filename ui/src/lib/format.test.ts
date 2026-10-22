@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { edgeRange, money, parseCents, percent } from "./format";
+import { edgeRange, filled, held, money, parseCents, percent } from "./format";
 
 describe("money", () => {
   it("writes whole cents as dollars without floating point", () => {
@@ -33,5 +33,14 @@ describe("edgeRange", () => {
     expect(edgeRange([-0.033, 0.054], 1)).toBe("likely between −3.3 and +5.4 points");
     expect(edgeRange([-0.04, 0.06], 3)).toBe("likely between −4.0 and +6.0 points, allowing for 3 runs on this data");
     expect(edgeRange(undefined)).toBe("");
+  });
+});
+
+describe("held and filled", () => {
+  it("names shorts and buy-ins", () => {
+    expect(held(1_200)).toBe("1,200");
+    expect(held(-10)).toBe("10 short");
+    expect(filled({ side: "BUY", buy_in: true })).toBe("Bought back");
+    expect(filled({ side: "SELL" })).toBe("Sold");
   });
 });

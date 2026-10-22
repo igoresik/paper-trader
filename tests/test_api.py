@@ -214,3 +214,13 @@ def test_report_card_sums_up_the_traders_record(client):
 def test_equity_curve_starts_at_100(client):
     acc = open_account(client)
     assert client.get(f"/portfolio/{acc}/equity").json()["equity_index"][0] == 100
+
+
+def test_selling_short_takes_its_flag(client):
+    acc = open_account(client, 1_000_000)
+    plain = market_order(client, acc, 10, side="SELL")
+    assert plain.status_code == 400 and "Sell short" in plain.json()["detail"]
+    body = {"account_id": acc, "symbol": "aapl", "side": "SELL", "shares": 10, "short": True}
+    assert client.post("/orders/execute", json=body).status_code == 200
+    held = client.get(f"/portfolio/{acc}").json()
+    assert (held["positions"][0]["shares"], held["buying_power_cents"]) == (-10, 1_000_000 + 150_000 - 225_000)

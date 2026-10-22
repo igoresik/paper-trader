@@ -108,3 +108,16 @@ def wait_for(check, seconds=5):
             return True
         time.sleep(0.02)
     return False
+
+
+def test_a_short_is_bought_back_live_once_its_buy_in_price_trades(monkeypatch):
+    monkeypatch.setattr(market, "check_splits", lambda symbol: None)
+    acc = ledger.create_account("Main", 100_000_00)["id"]
+    ledger.execute_market(acc, "AAPL", "SELL", 10, 10_000, short=True, now=OPEN - 60)
+    worker = Worker(lambda event: None)
+    worker.orders_changed()
+    assert worker.with_orders == {"AAPL"}  # no open orders, but a buy-in to watch
+    tick(worker, 115.0)  # the buy-in is at $115.39
+    tick(worker, 115.5, 1)
+    assert wait_for(lambda: ledger.positions(acc) == [])
+    assert ledger.history(acc)["items"][0]["price_cents"] == 11_550

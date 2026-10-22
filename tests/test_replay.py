@@ -78,3 +78,12 @@ def test_replay_api(aapl, monkeypatch):
         assert client.post("/orders/execute", json=live_order).status_code == 400
         assert client.delete(f"/replays/{acc}").status_code == 204
         assert client.get("/replays").json() == []
+
+
+def test_a_short_in_a_replay_is_bought_back_when_its_buy_in_price_comes(aapl):
+    acc = replay.start("AAPL", START, 1_000_000)["account"]["id"]
+    replay.order(acc, "SELL", "MARKET", 10, short=True)
+    assert replay.step(acc)[0]["price_cents"] == 10_100
+    fills = replay.step(acc, 20)  # $151.50 of collateral is 130% of buying back at $116.54; day 17 opens at $117
+    assert [(f["price_cents"], f.get("buy_in")) for f in fills] == [(11_700, True)]
+    assert replay.state(acc)["portfolio"]["positions"] == []

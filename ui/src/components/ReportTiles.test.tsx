@@ -19,7 +19,7 @@ afterEach(cleanup);
 describe("ReportTiles", () => {
   it("shows dashes, not zeros, before there is anything to measure", () => {
     render(<ReportTiles r={fresh} model={model} />);
-    expect(tile("Sales that made money").textContent).toBe("Sales that made money–Shows up after your first sale");
+    expect(tile("Closed trades that made money").textContent).toBe("Closed trades that made money–Shows up after you first sell or buy back");
     expect(tile("Biggest drop").textContent).toContain("–");
     expect(tile("SPY's model").textContent).toBe("SPY's model–Needs a close first");
   });
@@ -27,7 +27,7 @@ describe("ReportTiles", () => {
   it("signs wins and losses with arrows as well as colour", () => {
     render(<ReportTiles r={{ ...fresh, sells: 4, wins: 3, avg_win_cents: 1_250, avg_loss_cents: -3_000, max_drawdown: -0.084,
       commission_cents: 400, slippage_cents: 37, time_in_market: 0.5, model: { return: 0.031, days: 20 } }} model={model} />);
-    expect(tile("Sales that made money").textContent).toContain("75%3 of 4 sales");
+    expect(tile("Closed trades that made money").textContent).toContain("75%3 of 4 sales and buy-backs");
     expect(tile("Average win and loss").textContent).toContain("▲ +$12.50 / ▼ −$30.00");
     expect(tile("Biggest drop").textContent).toContain("▼ −8.4%");
     expect(tile("Costs paid").textContent).toBe("Costs paid$4.37$4.00 commission, $0.37 slippage");

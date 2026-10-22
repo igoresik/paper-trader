@@ -20,7 +20,7 @@ const fill = { id: 7, order_id: 3, side: "BUY", type: "MARKET", symbol: "AAPL", 
 const settings = { commission_cents: 100, commission_bps: 5, slippage_bps: 10, confirm_orders: false, practice_mode: false } as Settings;
 
 function portfolio(buyingPower = 1_000_000, owned = 0): Portfolio {
-  const positions = owned ? [{ symbol: "AAPL", shares: owned }] : [];
+  const positions = owned ? [{ symbol: "AAPL", shares: owned, cost_basis_cents: owned * 10_000 }] : [];
   return { buying_power_cents: buyingPower, positions } as Portfolio;
 }
 
@@ -54,18 +54,18 @@ describe("Ticket", () => {
     const execute = vi.spyOn(api, "execute").mockResolvedValue(fill);
     const user = show();
     await user.click(submit());
-    expect(execute).toHaveBeenCalledWith(1, "AAPL", "BUY", 10);
+    expect(execute).toHaveBeenCalledWith(1, "AAPL", "BUY", 10, false);
     const receipt = await screen.findByRole("status");
     expect(within(receipt).getByText("Total paid").nextElementSibling?.textContent).toBe("$1,002.91");
   });
 
-  it("won't sell shares that aren't owned", async () => {
+  it("won't sell more than is owned, or go from long to short in one order", async () => {
     const user = show(portfolio(1_000_000, 5));
     await user.click(ticket().getByRole("tab", { name: "Sell" }));
-    expect(ticket().getByText("You own 5 AAPL.")).toBeTruthy();
+    expect(ticket().getByText("You own 5 AAPL. Sell those before selling short.")).toBeTruthy();
     await user.clear(ticket().getByLabelText("Shares"));
     await user.type(ticket().getByLabelText("Shares"), "6");
-    expect(ticket().getByText("You own 5 AAPL.")).toBeTruthy();
+    expect(ticket().getByText("You own 5 AAPL. Sell those before selling short.")).toBeTruthy();
     expect(submit().hasAttribute("disabled")).toBe(true);
     await user.clear(ticket().getByLabelText("Shares"));
     await user.type(ticket().getByLabelText("Shares"), "5");
@@ -119,7 +119,7 @@ describe("Ticket", () => {
     expect(execute).not.toHaveBeenCalled();
     await user.click(submit());
     await user.click(submit());
-    expect(execute).toHaveBeenCalledWith(1, "AAPL", "BUY", 100);
+    expect(execute).toHaveBeenCalledWith(1, "AAPL", "BUY", 100, false);
   });
 
   it("shows why the engine refused an order", async () => {
@@ -127,5 +127,41 @@ describe("Ticket", () => {
     const user = show();
     await user.click(submit());
     await waitFor(() => expect(ticket().getByText(/^Not enough cash/)).toBeTruthy());
+  });
+
+  it("turns a sell with nothing held into a short sale, with its margin and buy-in price", async () => {
+    const execute = vi.spyOn(api, "execute").mockResolvedValue(fill);
+    const user = show();
+    await user.click(ticket().getByRole("tab", { name: "Sell" }));
+    expect(submit().textContent).toBe("Sell short 10 AAPL");
+    expect(shown("Estimated proceeds")).toBe("$997.70");
+    expect(shown("Margin held")).toBe("$498.85"); // 150% of the proceeds is held, the proceeds themselves included
+    expect(ticket().getByText(/rises to about \$115\.12, the app buys the short back/)).toBeTruthy();
+    await user.click(submit());
+    expect(execute).toHaveBeenCalledWith(1, "AAPL", "SELL", 10, true);
+  });
+
+  it("won't short past the buying power, and Max finds the most that fits", async () => {
+    const user = show(portfolio(40_000));
+    await user.click(ticket().getByRole("tab", { name: "Sell" }));
+    expect(ticket().getByText("Selling short needs $498.85 of margin; you have $400.00 to spend.")).toBeTruthy();
+    expect(submit().hasAttribute("disabled")).toBe(true);
+    cleanup();
+    const again = show(portfolio(100_000));
+    await again.click(ticket().getByRole("tab", { name: "Sell" }));
+    await again.click(ticket().getByRole("button", { name: "Max" }));
+    expect((ticket().getByLabelText("Shares") as HTMLInputElement).value).toBe("20");
+    expect(submit().hasAttribute("disabled")).toBe(false);
+  });
+
+  it("buys a short back with the collateral it frees, never past the shares owed", async () => {
+    const user = show(portfolio(0, -10));
+    expect(submit().textContent).toBe("Buy back 10 AAPL");
+    expect(ticket().getByText("Short 10")).toBeTruthy();
+    expect(submit().hasAttribute("disabled")).toBe(false); // no buying power needed: the collateral pays
+    await user.type(ticket().getByLabelText("Shares"), "1");
+    expect(ticket().getByText("You're short 10 AAPL, so you can buy back up to 10.")).toBeTruthy();
+    await user.click(ticket().getByRole("button", { name: "Max" }));
+    expect((ticket().getByLabelText("Shares") as HTMLInputElement).value).toBe("10");
   });
 });

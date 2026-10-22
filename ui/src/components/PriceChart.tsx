@@ -7,7 +7,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import type { ChartData, ChartPrefs } from "../lib/api";
-import { arrow, marketDay, marketTime, percent, price as fmtPrice } from "../lib/format";
+import { arrow, held, marketDay, marketTime, percent, price as fmtPrice } from "../lib/format";
 import { heikinAshi, withPrice, type Candle } from "../lib/candles";
 import { useQuote } from "../lib/live";
 
@@ -238,7 +238,7 @@ export function PriceChart({ data, prefs, theme, updown }: { data: ChartData; pr
     b.priceLines = [];
     if (prefs.avgCost && data.position)
       b.priceLines.push(
-        b.main.createPriceLine({ price: data.position.avg_cost_cents / 100, color: css("--ink-2"), lineStyle: LineStyle.Dashed, lineWidth: 1, title: `Avg cost · ${data.position.shares}` }),
+        b.main.createPriceLine({ price: data.position.avg_cost_cents / 100, color: css("--ink-2"), lineStyle: LineStyle.Dashed, lineWidth: 1, title: `Avg cost · ${held(data.position.shares)}` }),
       );
     if (prefs.orders)
       for (const order of data.orders)

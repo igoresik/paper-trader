@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
 import type { Order, Quote, Status, Trade } from "./api";
-import { money, shares } from "./format";
+import { filled, money, shares } from "./format";
 
 type Listener = () => void;
 
@@ -112,9 +112,10 @@ export function connect(client: QueryClient) {
         // the event can beat the ticket's own HTTP reply; wait for it, so a fill shown as a receipt doesn't toast too
         setTimeout(() => {
           if (shown.has(fill.id)) return;
-          const verb = fill.side === "BUY" ? "Bought" : "Sold";
-          toast.success(`${verb} ${shares(fill.shares)} ${fill.symbol} at ${money(fill.price_cents)}`, {
-            description: fill.type === "MARKET" ? "Your queued market order filled at the open." : `Your ${fill.type.toLowerCase()} order filled.`,
+          toast.success(`${filled(fill)} ${shares(fill.shares)} ${fill.symbol} at ${money(fill.price_cents)}`, {
+            description: fill.buy_in
+              ? "Forced buy-in: the short's collateral was down to 130% of the cost of buying back."
+              : fill.type === "MARKET" ? "Your queued market order filled at the open." : `Your ${fill.type.toLowerCase()} order filled.`,
           });
         }, 2_000);
         break;

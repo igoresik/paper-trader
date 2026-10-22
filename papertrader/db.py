@@ -98,6 +98,24 @@ UPGRADES = [
     ) WITHOUT ROWID;
     PRAGMA user_version = 5;
     """,
+    """
+    -- short selling: a position can go below zero shares, and its basis is then minus what the sales brought in.
+    -- SQLite can't change a CHECK, so the table is copied into a new one.
+    CREATE TABLE positions_new (
+        account_id INTEGER NOT NULL REFERENCES accounts (id),
+        symbol TEXT NOT NULL,
+        shares INTEGER NOT NULL,
+        cost_basis_cents INTEGER NOT NULL,
+        PRIMARY KEY (account_id, symbol),
+        CHECK (shares > 0 AND cost_basis_cents >= 0 OR shares < 0 AND cost_basis_cents < 0)
+    );
+    INSERT INTO positions_new SELECT account_id, symbol, shares, cost_basis_cents FROM positions;
+    DROP TABLE positions;
+    ALTER TABLE positions_new RENAME TO positions;
+    -- a sell that may open or add to a short; a plain sell only sells shares held
+    ALTER TABLE orders ADD COLUMN short INTEGER NOT NULL DEFAULT 0 CHECK (short IN (0, 1));
+    PRAGMA user_version = 6;
+    """,
 ]
 
 

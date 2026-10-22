@@ -39,6 +39,12 @@ export function shares(n: number): string {
   return grouped.format(n);
 }
 
+/** A position's size: below zero shares it is a short. */
+export const held = (n: number) => (n < 0 ? `${shares(-n)} short` : shares(n));
+
+/** What a fill did, for receipts' toasts. */
+export const filled = (f: { side: "BUY" | "SELL"; buy_in?: boolean }) => (f.buy_in ? "Bought back" : f.side === "BUY" ? "Bought" : "Sold");
+
 export function arrow(change: number | null | undefined): string {
   if (!change) return "";
   return change > 0 ? "▲" : "▼";

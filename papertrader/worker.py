@@ -93,8 +93,11 @@ class Worker:
                     self.submit(self.seed, "1d", [symbol])
 
     def orders_changed(self):
+        # symbols whose prices have something to fill: open orders, or a short's buy-in
         self.with_orders = {r["symbol"] for r in db.query(
-            "SELECT DISTINCT symbol FROM orders WHERE status = 'OPEN' AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)")}
+            "SELECT symbol FROM orders WHERE status = 'OPEN' AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
+            " UNION SELECT symbol FROM positions WHERE shares < 0"
+            " AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL AND archived_at IS NULL)")}
         if self.loop:
             self.loop.call_soon_threadsafe(self._wake.set)
 
@@ -203,8 +206,13 @@ class Worker:
     def _catch_up_bars(self, symbol, minutes):
         """Daily bars for the days before the minute data starts (Yahoo keeps minutes for about a week)."""
         first = minutes[0]["ts"]
-        oldest = db.query("SELECT MIN(created_at) AS t FROM orders WHERE symbol = ? AND status = 'OPEN'"
-                          " AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)", (symbol,))[0]["t"]
+        oldest = db.query(
+            "SELECT MIN(t) AS t FROM (SELECT created_at AS t FROM orders WHERE symbol = ? AND status = 'OPEN'"
+            " AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
+            " UNION ALL SELECT MAX(executed_at) FROM trades WHERE symbol = ? AND account_id IN"
+            " (SELECT account_id FROM positions WHERE symbol = ? AND shares < 0) AND account_id IN"
+            " (SELECT id FROM accounts WHERE replay_at IS NULL AND archived_at IS NULL) GROUP BY account_id)",
+            (symbol, symbol, symbol))[0]["t"]
         daily = db.query(
             "SELECT ts, open_cents AS open, high_cents AS high, low_cents AS low, close_cents AS close FROM bars"
             " WHERE symbol = ? AND interval = '1d' AND ts >= ? AND ts < ? ORDER BY ts",

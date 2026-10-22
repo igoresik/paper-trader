@@ -27,14 +27,15 @@ def start(symbol, start_ts, cash):
     return state(ledger.open_replay(symbol, first["ts"], cash)["id"])
 
 
-def order(account_id, side, kind, shares, limit_cents=None, stop_cents=None):
+def order(account_id, side, kind, shares, limit_cents=None, stop_cents=None, short=False):
     """An order placed after the clock's close. A market order fills at the next day's open."""
     acct = _replay(account_id)
     if acct["archived_at"] is not None:
         raise ledger.Conflict("This replay was closed.")
     close = _bars(acct["replay_symbol"], acct["replay_at"] - 1, acct["replay_at"])[0]["close"]
     return ledger.place_order(account_id, acct["replay_symbol"], side, kind, shares, limit_cents, stop_cents,
-                              ref_price_cents=close, costs=settings.costs(), now=market.session_close(acct["replay_at"]))
+                              ref_price_cents=close, costs=settings.costs(), now=market.session_close(acct["replay_at"]),
+                              short=short)
 
 
 def step(account_id, days=1):
