@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from papertrader import api, db, ledger, market, model, replay
+from papertrader import api, db, ledger, market, replay
 from papertrader.ledger import LedgerError
 
 START, DAY = 1_600_000_000, 86_400
