@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1 (2026-11-03)
+
+- The installer is now built on Python 3.15 and Node 26, and the Docker image runs on them too.
+- Newer FastAPI (0.162) and pandas (3.1) inside, and newer TanStack Query and Lucide icons in the window. No new features.
+- Behind the scenes: CI tests on Python 3.15 and Node 26 and builds the installer on every pull request, so a broken build shows up before a release. Newer Vite, pytest and httpx2. The README now has the real Python and Node versions, Mac and Linux setup, an architecture diagram and the design decisions.
+
 ## 1.4.0 (2026-10-22)
 
 - Model lab tests a third strategy, **calm before big moves**: hold less when the move reading expects a bigger move than usual, scored against holding the same average amount. The chart switches between the model's calls, lean sizing and calm, each next to its own same-size line.
