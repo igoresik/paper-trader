@@ -153,9 +153,11 @@ def move_replay_clock(account_id, ts):
 
 def archive_replay(account_id, now=None):
     with db.tx() as conn:
+        if not _rows(conn, "SELECT 1 FROM accounts WHERE id = ? AND replay_at IS NOT NULL", (account_id,)):
+            raise NotFound(f"There is no replay {account_id}.")
         conn.execute("UPDATE orders SET status = 'CANCELLED', reason = 'The replay was closed.', closed_at = ?"
                      " WHERE account_id = ? AND status = 'OPEN'", (now or _now(), account_id))
-        conn.execute("UPDATE accounts SET archived_at = ? WHERE id = ? AND replay_at IS NOT NULL", (now or _now(), account_id))
+        conn.execute("UPDATE accounts SET archived_at = ? WHERE id = ?", (now or _now(), account_id))
 
 
 def _live_account(conn, account_id):

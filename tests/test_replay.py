@@ -87,3 +87,12 @@ def test_a_short_in_a_replay_is_bought_back_when_its_buy_in_price_comes(aapl):
     fills = replay.step(acc, 20)  # $151.50 of collateral is 130% of buying back at $116.54; day 17 opens at $117
     assert [(f["price_cents"], f.get("buy_in")) for f in fills] == [(11_700, True)]
     assert replay.state(acc)["portfolio"]["positions"] == []
+
+
+def test_closing_a_replay_leaves_live_portfolios_alone(aapl):
+    live = ledger.create_account("Main", 1_000_000)["id"]
+    order = ledger.place_order(live, "AAPL", "BUY", "LIMIT", 1, limit_cents=9_000)
+    with pytest.raises(ledger.NotFound):
+        ledger.archive_replay(live)
+    assert ledger.orders(live)[0]["id"] == order["id"]
+    assert ledger.account(live)["archived_at"] is None
