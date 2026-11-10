@@ -75,7 +75,8 @@ def main():
     cmd.add_argument("symbol")
     cmd.add_argument("--interval", choices=["1d", "1h"], default="1d")
     cmd.add_argument("--estimator", choices=["random_forest", "gradient_boosting"], default="random_forest")
-    cmd.add_argument("--horizon", type=int, default=1, help="bars ahead; above 1, a barrier call")
+    cmd.add_argument("--horizon", type=int, default=1, choices=range(1, 21), metavar="1-20",
+                     help="bars ahead; above 1, a barrier call")
     cmd.add_argument("--activate", action="store_true", help="use this run for live signals")
     cmd.set_defaults(run=train)
     args = parser.parse_args()
