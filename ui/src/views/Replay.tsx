@@ -129,6 +129,7 @@ function Session({ id, onClosed }: { id: number; onClosed: () => void }) {
   const cancel = useMutation({
     mutationFn: api.cancelOrder,
     onSuccess: () => client.invalidateQueries({ queryKey: ["replay", id] }),
+    onError: (e) => toast.error(e.message),
   });
   const close = useMutation({ mutationFn: () => api.closeReplay(id), onSuccess: onClosed });
 
