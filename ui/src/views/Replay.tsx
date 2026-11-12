@@ -131,7 +131,11 @@ function Session({ id, onClosed }: { id: number; onClosed: () => void }) {
     onSuccess: () => client.invalidateQueries({ queryKey: ["replay", id] }),
     onError: (e) => toast.error(e.message),
   });
-  const close = useMutation({ mutationFn: () => api.closeReplay(id), onSuccess: onClosed });
+  const close = useMutation({
+    mutationFn: () => api.closeReplay(id),
+    onSuccess: onClosed,
+    onError: (e) => toast.error(e.message),
+  });
 
   // N moves to the next day, unless someone is typing
   useEffect(() => {

@@ -46,4 +46,18 @@ describe("Replay", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: "Cancel order 9" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("This order is already filled."));
   });
+
+  it("says why a replay couldn't be closed", async () => {
+    vi.spyOn(api, "replays").mockResolvedValue([{ ...account, state }]);
+    vi.spyOn(api, "replay").mockResolvedValue(state);
+    vi.spyOn(api, "chart").mockReturnValue(new Promise(() => {}));
+    vi.spyOn(api, "closeReplay").mockRejectedValue(new Error("There is no replay 5."));
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Replay />
+      </QueryClientProvider>,
+    );
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Close replay" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("There is no replay 5."));
+  });
 });
