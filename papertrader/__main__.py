@@ -26,6 +26,8 @@ def train(args):
     if market.needs_refresh(symbol, args.interval):
         market.refresh(symbol, args.interval)
     p = replace(model.defaults(args.interval), estimator=args.estimator, horizon=args.horizon)
+    if p.indicators.context and market.needs_refresh(market.CONTEXT[0], "1d"):
+        market.refresh_context()
     result = model.validate(symbol, p)
     m = result["metrics"]
     print(f"{symbol} {args.interval}, {p.estimator}, threshold {p.threshold:.1%}, walk-forward over {m['rows']} bars")
