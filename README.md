@@ -99,7 +99,7 @@ So the model can't tell which way SPY goes next: 52% is barely better than tossi
 
 ## Run from source
 
-Needs **Python 3.12 or newer** (CI runs 3.15) and **Node.js 22.22+ or 24.15+** (what the UI's build and test tools ask for).
+Needs **Python 3.12 or newer** (CI runs 3.15) and **Node.js 22.22.2+ or 24.15+** (what the UI's build and test tools ask for).
 
 First make a virtual environment and switch it on.
 
