@@ -301,7 +301,9 @@ def search(query, limit=8):
     try:
         quotes = yf.Search(query, max_results=limit * 2, news_count=0).quotes
     except Exception as error:
+        _failed()
         raise MarketError(OFFLINE) from error
+    _answered()
     found = [
         {"symbol": q["symbol"], "name": q.get("shortname") or q.get("longname") or q["symbol"], "kind": q["quoteType"]}
         for q in quotes
