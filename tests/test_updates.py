@@ -38,3 +38,14 @@ def test_yahoo_counts_as_down_until_it_answers_again(monkeypatch):
     assert market.yahoo_down()
     market._answered()
     assert not market.yahoo_down()
+
+
+def test_a_failed_search_counts_yahoo_as_down(monkeypatch):
+    def broken(*args, **kw):
+        raise ConnectionError("no route to host")
+
+    monkeypatch.setattr(market.yf, "Search", broken)
+    with pytest.raises(market.MarketError):
+        market.search("apple")
+    assert market.yahoo_down()
+    market._answered()
