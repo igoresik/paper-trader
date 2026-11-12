@@ -80,6 +80,17 @@ def test_replay_api(aapl, monkeypatch):
         assert client.get("/replays").json() == []
 
 
+def test_a_replay_order_has_the_same_limits_as_a_live_one(aapl, monkeypatch):
+    monkeypatch.setattr(market, "needs_refresh", lambda *args, **kwargs: False)
+    with TestClient(api.create_app(run_worker=False), base_url="http://127.0.0.1") as client:
+        acc = client.post("/replays", json={"symbol": "AAPL", "start": START}).json()["account"]["id"]
+        client.post(f"/replays/{acc}/orders", json={"side": "BUY", "type": "MARKET", "shares": 1})
+        client.post(f"/replays/{acc}/step", json={"days": 1})
+        huge = client.post(f"/replays/{acc}/orders", json={"side": "SELL", "type": "LIMIT", "shares": 1, "limit_cents": 10**19})
+        assert huge.status_code == 422
+        assert client.post(f"/replays/{acc}/orders", json={"side": "BUY", "type": "MARKET", "shares": 10**8}).status_code == 422
+
+
 def test_a_short_in_a_replay_is_bought_back_when_its_buy_in_price_comes(aapl):
     acc = replay.start("AAPL", START, 1_000_000)["account"]["id"]
     replay.order(acc, "SELL", "MARKET", 10, short=True)

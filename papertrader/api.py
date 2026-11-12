@@ -76,10 +76,10 @@ class ReplayIn(BaseModel):
 class ReplayOrderIn(BaseModel):
     side: Literal["BUY", "SELL"]
     type: Literal["MARKET", "LIMIT", "STOP"]
-    shares: Annotated[int, Field(ge=1)]
+    shares: Shares
     short: bool = False
-    limit_cents: Annotated[int, Field(gt=0)] | None = None
-    stop_cents: Annotated[int, Field(gt=0)] | None = None
+    limit_cents: Cents | None = None
+    stop_cents: Cents | None = None
 
 
 class StepIn(BaseModel):
