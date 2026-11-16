@@ -115,3 +115,10 @@ def test_a_closed_replay_cannot_be_stepped(aapl):
     with pytest.raises(ledger.Conflict):
         replay.step(acc)
     assert replay.state(acc)["clock"] == START
+
+
+def test_closing_a_replay_twice_keeps_the_first_close_time(aapl):
+    acc = replay.start("AAPL", START, 1_000_000)["account"]["id"]
+    ledger.archive_replay(acc, now=111)
+    ledger.archive_replay(acc, now=222)
+    assert ledger.account(acc)["archived_at"] == 111
