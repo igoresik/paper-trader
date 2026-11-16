@@ -157,7 +157,8 @@ def archive_replay(account_id, now=None):
             raise NotFound(f"There is no replay {account_id}.")
         conn.execute("UPDATE orders SET status = 'CANCELLED', reason = 'The replay was closed.', closed_at = ?"
                      " WHERE account_id = ? AND status = 'OPEN'", (now or _now(), account_id))
-        conn.execute("UPDATE accounts SET archived_at = ? WHERE id = ?", (now or _now(), account_id))
+        conn.execute("UPDATE accounts SET archived_at = ? WHERE id = ? AND archived_at IS NULL",
+                     (now or _now(), account_id))
 
 
 def _live_account(conn, account_id):
