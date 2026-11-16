@@ -41,6 +41,8 @@ def order(account_id, side, kind, shares, limit_cents=None, stop_cents=None, sho
 def step(account_id, days=1):
     """Move the clock forward, matching open orders against each new day in turn. Returns the fills."""
     acct = _replay(account_id)
+    if acct["archived_at"] is not None:
+        raise ledger.Conflict("This replay was closed.")
     events = []
     for bar in _bars(acct["replay_symbol"], acct["replay_at"])[:days]:
         events += ledger.match(acct["replay_symbol"], [bar], settings.costs(), account_id=account_id)
