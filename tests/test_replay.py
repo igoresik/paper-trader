@@ -107,3 +107,11 @@ def test_closing_a_replay_leaves_live_portfolios_alone(aapl):
         ledger.archive_replay(live)
     assert ledger.orders(live)[0]["id"] == order["id"]
     assert ledger.account(live)["archived_at"] is None
+
+
+def test_a_closed_replay_cannot_be_stepped(aapl):
+    acc = replay.start("AAPL", START, 1_000_000)["account"]["id"]
+    ledger.archive_replay(acc)
+    with pytest.raises(ledger.Conflict):
+        replay.step(acc)
+    assert replay.state(acc)["clock"] == START
