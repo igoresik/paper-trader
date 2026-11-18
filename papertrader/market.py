@@ -171,6 +171,8 @@ def refresh(symbol, interval="1d", now=None):
         for r in frame.itertuples()
         if is_complete(ts := int(r.Index.timestamp()), interval, now) and not pd.isna(r.Close) and not pd.isna(r.Volume)
     ]
+    if not rows and db.query("SELECT 1 FROM bars WHERE symbol = ? AND interval = ? LIMIT 1", (symbol, interval)):
+        return 0  # an empty answer must not wipe the history already stored; it is tried again next time
     with db.tx() as conn:
         conn.execute(
             "INSERT INTO symbols (symbol, name, exchange, kind, currency) VALUES (:symbol, :name, :exchange, :kind, :currency)"
