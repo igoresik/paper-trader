@@ -268,7 +268,7 @@ function Result({ run, onActivate, activating }: { run: Run; onActivate: () => v
           </p>
         )}
         <p>
-          <b className="font-semibold">As a strategy:</b> buying on its calls returned {percent(bt.strategy.total_return, { sign: true, digits: 1 })} against {percent(bt.buy_hold.total_return, { sign: true, digits: 1 })} for buy and hold over the same days, after {run.params.cost_bps} bps per trade.
+          <b className="font-semibold">As a strategy:</b> buying on its calls returned {percent(bt.strategy.total_return, { sign: true, digits: 1 })} against {percent(bt.buy_hold.total_return, { sign: true, digits: 1 })} for buy and hold over the same days, after {run.params.cost_bps} bps per trade.{(run.params.horizon ?? 1) > 1 ? " Each call is scored on the next bar's return, not on the barrier it was trained for." : ""}
         </p>
         {bt.sized && bt.steady && bt.sized_exposure != null && (
           <p>

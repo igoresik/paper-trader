@@ -99,6 +99,15 @@ def test_the_first_signal_shown_for_a_bar_is_kept(put_bars):
     assert set(first["indicators"]) == {"rsi", "ema_spread", "vol_z", "pct_b", "bb_width"}
 
 
+def test_backtest_says_it_scores_the_next_bar_even_for_barrier_calls():
+    close = pd.Series([100.0, 101, 102, 101, 103, 104])
+    oos = pd.DataFrame({"pred": [1, 1, 0, 1], "p_buy": 0.5, "p_sell": 0.2}, index=[0, 1, 2, 3])
+    plain = model.backtest(oos, close, Params(cost_bps=0))
+    barrier = model.backtest(oos, close, Params(cost_bps=0, horizon=5))
+    assert barrier["scored_on"] == "next bar"
+    assert barrier["strategy"] == plain["strategy"] and barrier["hit_rate"] == plain["hit_rate"]
+
+
 def test_two_first_signals_at_once_train_one_model(put_bars):
     put_bars("SPY", *random_walk())
     gate = threading.Barrier(2)
