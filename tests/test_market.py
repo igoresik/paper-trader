@@ -68,6 +68,15 @@ def test_refresh_replaces_the_old_bars(monkeypatch):
     assert closes() == [10_000, 10_100]
 
 
+def test_an_empty_answer_from_yahoo_keeps_the_stored_bars(monkeypatch):
+    serve(monkeypatch, daily(["2026-10-13", "2026-10-14"], [200.0, 202.0]))
+    market.refresh("SPY", "1d", now=ny(2026, 10, 20, 12))
+    serve(monkeypatch, daily([], []))  # Yahoo answers without an error but with no bars
+    assert market.refresh("SPY", "1d", now=ny(2026, 10, 20, 13)) == 0
+    assert closes() == [20_000, 20_200]
+    assert market.needs_refresh("SPY", "1d", now=ny(2026, 10, 21, 18))
+
+
 @pytest.mark.parametrize(
     "meta", [{"currency": "EUR", "instrumentType": "EQUITY"}, {"currency": "USD", "instrumentType": "CRYPTOCURRENCY"}]
 )
