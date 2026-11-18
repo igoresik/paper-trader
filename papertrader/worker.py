@@ -92,6 +92,12 @@ class Worker:
                 if "price_cents" not in self.quotes.get(symbol, {}):
                     self.submit(self.seed, "1d", [symbol])
 
+    def unwatch(self, symbol):
+        """Stop streaming a symbol that left the watchlist (positions and open orders keep it alive through symbols())."""
+        self.watched.discard(symbol)
+        if self.loop:
+            self.loop.call_soon_threadsafe(self._wake.set)
+
     def orders_changed(self):
         # symbols whose prices have something to fill: open orders, or a short's buy-in
         self.with_orders = {r["symbol"] for r in db.query(
