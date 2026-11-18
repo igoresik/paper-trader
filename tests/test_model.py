@@ -1,4 +1,5 @@
 import json
+import threading
 
 import numpy as np
 import pandas as pd
@@ -96,6 +97,26 @@ def test_the_first_signal_shown_for_a_bar_is_kept(put_bars):
     assert len(db.query("SELECT * FROM signals")) == 1
     assert len(db.query("SELECT * FROM models WHERE active = 1")) == 1
     assert set(first["indicators"]) == {"rsi", "ema_spread", "vol_z", "pct_b", "bb_width"}
+
+
+def test_two_first_signals_at_once_train_one_model(put_bars):
+    put_bars("SPY", *random_walk())
+    gate = threading.Barrier(2)
+    out, errors = [], []
+
+    def go():
+        try:
+            gate.wait()
+            out.append(model.live_signal("SPY", "1d"))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    assert len(db.query("SELECT * FROM models")) == 1
+    assert out[0]["model_id"] == out[1]["model_id"]
 
 
 def test_only_one_run_is_active(put_bars):
