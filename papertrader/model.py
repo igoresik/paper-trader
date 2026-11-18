@@ -422,14 +422,23 @@ _fitted = {}  # (symbol, interval) -> (model id, last bar, estimators); kept in 
 # honest live record; this is what the watchlist shows, so it follows a retested or newly chosen model
 latest = {}
 _fit_lock = threading.Lock()
+_train_locks = {}  # (symbol, interval) -> lock around first-time training
+_train_locks_guard = threading.Lock()
 
 
 def live_signal(symbol, interval):
     """Signal for the bar after the latest complete one. Trains and activates a default model the first time."""
-    chosen = active(symbol, interval) or activate(validate(symbol, defaults(interval))["id"])
+    chosen = active(symbol, interval)
+    if not chosen or "move" not in chosen["metrics"]:
+        with _train_locks_guard:
+            lock = _train_locks.setdefault((symbol, interval), threading.Lock())
+        with lock:  # a second caller waits here, then finds the model the first one made
+            chosen = active(symbol, interval)
+            if not chosen:
+                chosen = activate(validate(symbol, defaults(interval))["id"])
+            elif "move" not in chosen["metrics"]:  # tested before move readings existed: once more, same settings
+                chosen = activate(validate(symbol, Params.load(chosen["params"]))["id"])
     p = Params.load(chosen["params"])
-    if "move" not in chosen["metrics"]:  # tested before move readings existed: once more, with the same settings
-        chosen = activate(validate(symbol, p)["id"])
     bars, X, y = dataset(symbol, p)
     big, usual = features.move_labels(bars["close"])
     if X.iloc[-1].isna().any():

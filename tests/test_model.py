@@ -1,4 +1,5 @@
 import json
+import threading
 
 import numpy as np
 import pandas as pd
@@ -105,6 +106,26 @@ def test_backtest_says_it_scores_the_next_bar_even_for_barrier_calls():
     barrier = model.backtest(oos, close, Params(cost_bps=0, horizon=5))
     assert barrier["scored_on"] == "next bar"
     assert barrier["strategy"] == plain["strategy"] and barrier["hit_rate"] == plain["hit_rate"]
+
+
+def test_two_first_signals_at_once_train_one_model(put_bars):
+    put_bars("SPY", *random_walk())
+    gate = threading.Barrier(2)
+    out, errors = [], []
+
+    def go():
+        try:
+            gate.wait()
+            out.append(model.live_signal("SPY", "1d"))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    assert len(db.query("SELECT * FROM models")) == 1
+    assert out[0]["model_id"] == out[1]["model_id"]
 
 
 def test_only_one_run_is_active(put_bars):
