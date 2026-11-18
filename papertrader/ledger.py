@@ -718,11 +718,13 @@ def _walk(account_id, days, close_on):
             c["cash_cents"]) for c in paid],  # the fraction paid out
         key=lambda move: move[0],
     )
-    values, held, cash, done = [], {}, acct["starting_cash_cents"], 0
+    values, held, cash, done, last = [], {}, acct["starting_cash_cents"], 0, {}
     for day, closed_at in days:
         while done < len(moves) and moves[done][0] <= closed_at:
             _, symbol, shares, money_in = moves[done]
             held[symbol], cash, done = held.get(symbol, 0) + shares, cash + money_in, done + 1
         holding = {symbol: n for symbol, n in held.items() if abs(n) > 1e-9}
-        values.append((cash + round(sum(n * (close_on(symbol, day) or 0) for symbol, n in holding.items())), bool(holding)))
+        for symbol in holding:  # a day with no bar for a holding keeps its last known close instead of valuing it at 0
+            last[symbol] = close_on(symbol, day) or last.get(symbol, 0)
+        values.append((cash + round(sum(n * last[symbol] for symbol, n in holding.items())), bool(holding)))
     return values
