@@ -81,6 +81,23 @@ def test_ticks_that_arrive_mid_match_are_matched_together_next():
     assert wait_for(lambda: runs == [1, 3])
 
 
+def test_a_failing_split_check_doesnt_stop_later_ticks_from_matching():
+    worker, runs, checks = Worker(lambda event: None), [], []
+    worker.with_orders = {"AAPL"}
+
+    def check_splits(symbol):
+        checks.append(symbol)
+        if len(checks) == 1:
+            raise RuntimeError("database is locked")
+
+    worker.check_splits = check_splits
+    worker.match = lambda symbol, ticks: runs.append(len(ticks))
+    tick(worker, 150.0)
+    assert wait_for(lambda: checks == ["AAPL"] and "AAPL" not in worker.ticks)
+    tick(worker, 150.0, 1)
+    assert wait_for(lambda: runs == [1])
+
+
 def test_a_split_reaches_open_orders_before_ticks_at_the_new_price(monkeypatch):
     acc = ledger.create_account("Main", 100_000)["id"]
     ledger.execute_market(acc, "AAPL", "BUY", 10, 9_500, now=OPEN - 86_400)

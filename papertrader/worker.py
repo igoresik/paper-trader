@@ -358,7 +358,12 @@ class Worker:
             self.submit(self._match_ticks, symbol, pool=self.matcher)
 
     def _match_ticks(self, symbol):
-        self.check_splits(symbol)
+        try:
+            self.check_splits(symbol)
+        except Exception:
+            with self._ticks_lock:
+                self.ticks.pop(symbol, None)  # else the symbol stays "waiting" and no later tick ever queues a match
+            raise
         with self._ticks_lock:
             ticks = self.ticks.pop(symbol, [])
         if ticks:
