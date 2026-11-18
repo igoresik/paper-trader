@@ -223,6 +223,8 @@ export interface Run {
       calm?: Performance;
       calm_steady?: Performance;
       exposure: number;
+      /** always the next bar's return, even when the calls are barrier calls (horizon above 1); runs from before this lack it */
+      scored_on?: string;
       sized_exposure?: number;
       calm_exposure?: number;
       trades: number;

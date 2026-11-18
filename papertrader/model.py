@@ -265,6 +265,7 @@ def backtest(oos, close, p, move_oos=None):
         "steady": _performance(steady, curve_c, PER_YEAR[p.interval]),
         **{k: v for k, v in calm.items() if k != "curve"},
         "exposure": float(held.mean()),
+        "scored_on": "next bar",  # with a barrier horizon the calls mean something else; the returns are still 1 bar
         "sized_exposure": float(weights.mean()),
         "trades": int(((held == 1) & (np.concatenate([[0.0], held[:-1]]) == 0)).sum()),
         "hit_rate": float((r[buys] > 0).mean()) if buys.any() else None,
