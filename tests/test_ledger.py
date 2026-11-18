@@ -307,6 +307,15 @@ def test_equity_curve_values_holdings_at_each_close():
     assert curve == [100_000, 90_000 + 10 * 1_100]
 
 
+def test_equity_curve_keeps_the_last_close_when_a_day_has_no_bar():
+    acc = account(100_000)
+    buy(acc, 10, 1_000, now=T0 + 100)
+    closes = {(T0 + 86_400, "AAPL"): 1_100}  # day 3 has no bar at all
+    days = [(T0 - 50_000, T0), (T0 + 36_400, T0 + 86_400), (T0 + 122_800, T0 + 172_800)]
+    curve = ledger.equity_curve(acc, days, lambda symbol, day: closes.get((day + 50_000, symbol)))
+    assert curve == [100_000, 90_000 + 11_000, 90_000 + 11_000]
+
+
 def test_equity_curve_counts_fills_booked_out_of_time_order():
     acc = account(100_000)
     buy(acc, 1, 1_000, now=T0 + 200)
