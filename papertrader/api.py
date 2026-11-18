@@ -590,6 +590,7 @@ def create_app(run_worker=True):
     def unwatch(symbol: str):
         with db.tx() as conn:
             conn.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol.upper(),))
+        worker.unwatch(symbol.upper())
 
     @app.put("/watchlist", tags=["market"])
     def reorder(body: ReorderIn):

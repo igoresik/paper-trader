@@ -194,6 +194,13 @@ def test_history_downloads_as_csv(client):
     assert row[1:6] == ["AAPL", "BUY", "MARKET", "2", "150.00"]
 
 
+def test_removing_from_the_watchlist_stops_streaming_it(client, app):
+    assert client.post("/watchlist", json={"symbol": "AAPL"}).status_code == 201
+    assert "AAPL" in app.state.worker.watched
+    assert client.delete("/watchlist/AAPL").status_code == 204
+    assert "AAPL" not in app.state.worker.watched
+
+
 def test_watchlist_keeps_its_order(client, put_bars):
     put_bars("MSFT", *walk(seed=1))
     for symbol in ("aapl", "msft"):
