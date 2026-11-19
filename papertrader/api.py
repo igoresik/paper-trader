@@ -372,7 +372,7 @@ def create_app(run_worker=True):
         spy = curve["benchmark_index"]
         return {
             **card,
-            "max_drawdown": ledger.max_drawdown(curve["equity_cents"]),
+            "max_drawdown": ledger.max_drawdown(curve["equity_cents"], ledger.account(account_id)["starting_cash_cents"]),
             "since": curve["t"][0],
             "return": curve["equity_index"][-1] / 100 - 1,
             "spy_return": spy[-1] / 100 - 1 if spy[-1] else None,
