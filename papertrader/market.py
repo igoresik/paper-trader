@@ -169,7 +169,7 @@ def refresh(symbol, interval="1d", now=None):
     rows = [
         (symbol, interval, ts, cents(r.Open), cents(r.High), cents(r.Low), cents(r.Close), int(r.Volume))
         for r in frame.itertuples()
-        if is_complete(ts := int(r.Index.timestamp()), interval, now) and not pd.isna(r.Close) and not pd.isna(r.Volume)
+        if is_complete(ts := int(r.Index.timestamp()), interval, now) and not any(pd.isna(v) for v in (r.Open, r.High, r.Low, r.Close, r.Volume))
     ]
     if not rows and db.query("SELECT 1 FROM bars WHERE symbol = ? AND interval = ? LIMIT 1", (symbol, interval)):
         return 0  # an empty answer must not wipe the history already stored; it is tried again next time
@@ -289,7 +289,7 @@ def intraday(symbols, period="1d", interval="1m"):
     _answered()
     found = {}
     for symbol in set(symbols) & set(data.columns.get_level_values(0)):
-        rows = data[symbol].dropna(subset=["Close"])
+        rows = data[symbol].dropna(subset=["Open", "High", "Low", "Close"])
         found[symbol] = [
             {"ts": int(r.Index.timestamp()), "open": cents(r.Open), "high": cents(r.High), "low": cents(r.Low),
              "close": cents(r.Close), "volume": 0 if pd.isna(r.Volume) else int(r.Volume)}
