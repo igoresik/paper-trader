@@ -355,7 +355,7 @@ def create_app(run_worker=True):
         base_b = next((b for b in bench if b), None)
         return {
             "t": t, "equity_cents": values,
-            "equity_index": [round(v / values[0] * 100, 3) for v in values],
+            "equity_index": [round(v / values[0] * 100, 3) if values[0] > 0 else None for v in values],
             "benchmark": "SPY",
             "benchmark_index": [round(b / base_b * 100, 3) if b and base_b else None for b in bench],
         }
