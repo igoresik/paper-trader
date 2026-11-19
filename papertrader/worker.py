@@ -78,7 +78,7 @@ class Worker:
 
     def symbols(self):
         rows = db.query(
-            "SELECT symbol FROM watchlist UNION SELECT symbol FROM positions WHERE account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
+            "SELECT symbol FROM watchlist UNION SELECT symbol FROM positions WHERE account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL AND archived_at IS NULL)"
             " UNION SELECT symbol FROM orders WHERE status = 'OPEN' AND account_id IN (SELECT id FROM accounts WHERE replay_at IS NULL)"
         )
         return {row["symbol"] for row in rows} | self.watched | {"SPY"}  # SPY is the benchmark
