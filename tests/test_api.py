@@ -231,3 +231,10 @@ def test_selling_short_takes_its_flag(client):
     assert client.post("/orders/execute", json=body).status_code == 200
     held = client.get(f"/portfolio/{acc}").json()
     assert (held["positions"][0]["shares"], held["buying_power_cents"]) == (-10, 1_000_000 + 150_000 - 225_000)
+
+
+def test_a_reset_portfolio_cannot_be_the_active_one(client):
+    acc = open_account(client)
+    client.post(f"/accounts/{acc}/reset", json={"starting_cash_cents": 50_000})
+    assert client.put("/settings", json={"account_id": acc}).status_code == 409
+
