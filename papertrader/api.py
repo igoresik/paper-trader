@@ -355,7 +355,7 @@ def create_app(run_worker=True):
         base_b = next((b for b in bench if b), None)
         return {
             "t": t, "equity_cents": values,
-            "equity_index": [round(v / values[0] * 100, 3) for v in values],
+            "equity_index": [round(v / values[0] * 100, 3) if values[0] > 0 else None for v in values],
             "benchmark": "SPY",
             "benchmark_index": [round(b / base_b * 100, 3) if b and base_b else None for b in bench],
         }
@@ -637,6 +637,8 @@ def create_app(run_worker=True):
         changes = body.model_dump(exclude_unset=True, exclude_none=True)  # a null would wipe out the default
         if changes.get("account_id") is not None:
             ledger.live_only(changes["account_id"])
+            if ledger.account(changes["account_id"])["archived_at"] is not None:
+                raise ledger.Conflict("That portfolio was reset, so it can't be the one you trade in.")
         return settings.update(changes)
 
     @app.get("/status", tags=["app"])

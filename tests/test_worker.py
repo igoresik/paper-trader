@@ -138,3 +138,11 @@ def test_a_short_is_bought_back_live_once_its_buy_in_price_trades(monkeypatch):
     tick(worker, 115.5, 1)
     assert wait_for(lambda: ledger.positions(acc) == [])
     assert ledger.history(acc)["items"][0]["price_cents"] == 11_550
+
+
+def test_a_reset_portfolio_no_longer_streams_its_symbols():
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.execute_market(acc, "AAPL", "BUY", 1, 1_000)
+    assert "AAPL" in Worker(lambda event: None).symbols()
+    ledger.reset_account(acc, 100_000)
+    assert "AAPL" not in Worker(lambda event: None).symbols()
