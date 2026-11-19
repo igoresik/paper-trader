@@ -66,7 +66,7 @@ def state(account_id):
         "orders": ledger.orders(account_id),
         "report": {
             **ledger.report_card(account_id, days, lambda s, day: closes.get(day)),
-            "max_drawdown": ledger.max_drawdown(values),
+            "max_drawdown": ledger.max_drawdown(values, acct["starting_cash_cents"]),
             "since": acct["created_at"],
             "return": values[-1] / acct["starting_cash_cents"] - 1,
             "benchmark_return": last / seen[0]["close"] - 1,  # bought on the first day and held

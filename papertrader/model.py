@@ -211,7 +211,7 @@ def _performance(returns, equity, per_year):
         "total_return": float(equity[-1] - 1),
         "cagr": float(equity[-1] ** (1 / years) - 1) if equity[-1] > 0 else -1.0,
         "sharpe": float(returns.mean() / std * np.sqrt(per_year)) if std > 0 else 0.0,
-        "max_drawdown": float((equity / np.maximum.accumulate(equity) - 1).min()),
+        "max_drawdown": float((equity / np.maximum.accumulate(np.r_[1.0, equity])[1:] - 1).min()),
     }
 
 
