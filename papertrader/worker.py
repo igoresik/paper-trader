@@ -18,6 +18,7 @@ log = logging.getLogger("papertrader")
 STREAM = "wss://streamer.finance.yahoo.com/?version=2"
 SESSIONS = {0: "pre", 1: "regular", 2: "post", 3: "post"}  # Yahoo's market_hours; 0 is left out of messages
 FRESH = 15  # seconds a streamed price counts as live for a market order
+SPLIT_RETRY = 60  # seconds before a failed split check is tried again
 BUCKET = {"1m": 60, "5m": 300, "1h": 3_600}  # counted from the 09:30 open
 
 
@@ -43,6 +44,7 @@ class Worker:
         self.ticks = {}  # symbol -> ticks waiting for the matcher
         self._ticks_lock = threading.Lock()
         self.split_checked = {}  # symbol -> the day its splits were last checked
+        self.split_retry_at = {}  # symbol -> when a failed check may be tried again
         self.update = None  # a newer release, once checked
         self.loop = None
         self._wake = None
@@ -165,10 +167,13 @@ class Worker:
         today = market.day_start(time.time())
         if self.split_checked.get(symbol) == today or market.session() not in ("regular", "post"):
             return
+        if time.time() < self.split_retry_at.get(symbol, 0):
+            return
         try:
             market.check_splits(symbol)
         except market.MarketError as error:
             log.warning("split check for %s failed: %s", symbol, error)
+            self.split_retry_at[symbol] = time.time() + SPLIT_RETRY
             return
         self.split_checked[symbol] = today
         self.apply_splits(symbol)
