@@ -315,3 +315,8 @@ def test_overlapping_barrier_calls_count_as_fewer():
     band = {"n": 60, "right": 45}
     assert model._clear(band, 0.5)  # 60 separate days, 75% right
     assert not model._clear(band, 0.5, horizon=4)  # 4-day calls a day apart: about 15 separate stretches
+
+
+def test_backtest_drawdown_counts_a_first_bar_loss():
+    equity = np.array([0.9, 0.95])
+    assert model._performance(np.array([-0.1, 0.055]), equity, 252)["max_drawdown"] == pytest.approx(-0.1)
