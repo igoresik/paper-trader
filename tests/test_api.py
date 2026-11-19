@@ -138,6 +138,12 @@ def test_settings_are_checked(client):
     assert client.put("/settings", json={"commission_cents": None}).json()["commission_cents"] == 0
 
 
+def test_chart_and_lab_settings_have_a_size_cap(client):
+    assert client.put("/settings", json={"chart": {"x": "a" * 30_000}}).status_code == 422
+    assert client.put("/settings", json={"lab": {"x": "a" * 30_000}}).status_code == 422
+    assert client.put("/settings", json={"chart": {"x": 1}}).status_code == 200
+
+
 def test_chart_lines_up_with_its_bars(client):
     acc = open_account(client)
     market_order(client, acc, 1)

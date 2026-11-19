@@ -3,6 +3,7 @@
 import asyncio
 import csv
 import io
+import json
 import os
 import re
 import time
@@ -17,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import __version__, db, features, ledger, market, model, replay, settings
 from .worker import Worker
@@ -99,6 +100,13 @@ class SettingsIn(BaseModel):
     account_id: int | None = None
     chart: dict | None = None
     lab: dict | None = None
+
+    @field_validator("chart", "lab")
+    @classmethod
+    def small_enough(cls, value):
+        if value is not None and len(json.dumps(value)) > 20_000:
+            raise ValueError("too big to store as a setting")
+        return value
 
 
 class IndicatorsIn(BaseModel):
