@@ -140,6 +140,24 @@ def test_a_short_is_bought_back_live_once_its_buy_in_price_trades(monkeypatch):
     assert ledger.history(acc)["items"][0]["price_cents"] == 11_550
 
 
+def test_a_failed_split_check_waits_before_trying_again(monkeypatch):
+    calls = []
+
+    def down(symbol):
+        calls.append(symbol)
+        raise market.MarketError("offline")
+
+    monkeypatch.setattr(market, "check_splits", down)
+    monkeypatch.setattr(market, "session", lambda *a: "regular")
+    worker = Worker(lambda event: None)
+    worker.check_splits("AAPL")
+    worker.check_splits("AAPL")
+    assert calls == ["AAPL"]
+    worker.split_retry_at["AAPL"] = 0
+    worker.check_splits("AAPL")
+    assert calls == ["AAPL", "AAPL"]
+
+
 def test_a_reset_portfolio_no_longer_streams_its_symbols():
     acc = ledger.create_account("Main", 100_000)["id"]
     ledger.execute_market(acc, "AAPL", "BUY", 1, 1_000)
