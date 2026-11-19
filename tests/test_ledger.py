@@ -408,6 +408,11 @@ def test_report_card_scores_the_trader():
     assert ledger.max_drawdown([100_000, 99_900, 101_800, 100_200]) == 100_200 / 101_800 - 1
 
 
+def test_drawdown_counts_a_fall_before_the_first_close():
+    assert ledger.max_drawdown([90_000, 95_000]) == 0.0
+    assert ledger.max_drawdown([90_000, 95_000], start=100_000) == 90_000 / 100_000 - 1
+
+
 # short selling
 
 

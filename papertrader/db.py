@@ -133,6 +133,8 @@ def init():
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never wait for a writer
         version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version > len(UPGRADES) + 1:
+            raise RuntimeError("This data was made by a newer Paper Trader. Update the app instead of opening it with this one.")
         if version == 0:
             _run(conn, (ROOT / "schema.sql").read_text(encoding="utf-8"))
         elif version <= len(UPGRADES):

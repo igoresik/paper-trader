@@ -672,9 +672,10 @@ def equity_curve(account_id, days, close_on):
     return [value for value, _ in _walk(account_id, days, close_on)]
 
 
-def max_drawdown(values):
-    """The biggest fall from a peak, as a share of that peak: -0.1 is 10% down from the best close before it."""
-    peak, worst = None, 0.0
+def max_drawdown(values, start=None):
+    """The biggest fall from a peak, as a share of that peak: -0.1 is 10% down from the best close before it.
+    start is what the portfolio opened with, so a fall before the first close counts too."""
+    peak, worst = start, 0.0
     for value in values:
         peak = value if peak is None else max(peak, value)
         worst = min(worst, value / peak - 1) if peak else worst

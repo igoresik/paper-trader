@@ -1,6 +1,8 @@
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from papertrader import db, ledger
 
 
@@ -22,3 +24,12 @@ def test_an_installed_copy_upgrades_and_keeps_its_data(tmp_path, monkeypatch):
 
 def test_a_new_database_makes_no_backup(tmp_path):
     assert not list(tmp_path.glob("*backup*"))
+
+
+def test_a_database_from_a_newer_version_is_left_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "new.db")
+    db.init()
+    with closing(sqlite3.connect(db.DB_PATH)) as conn:
+        conn.execute(f"PRAGMA user_version = {len(db.UPGRADES) + 2}")
+    with pytest.raises(RuntimeError, match="newer"):
+        db.init()

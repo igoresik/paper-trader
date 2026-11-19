@@ -122,3 +122,13 @@ def test_closing_a_replay_twice_keeps_the_first_close_time(aapl):
     ledger.archive_replay(acc, now=111)
     ledger.archive_replay(acc, now=222)
     assert ledger.account(acc)["archived_at"] == 111
+
+
+def test_a_replay_whose_prices_are_gone_says_so(aapl):
+    acc = replay.start("AAPL", START, 1_000_000)["account"]["id"]
+    with db.tx() as conn:
+        conn.execute("DELETE FROM bars WHERE symbol = 'AAPL'")
+    with pytest.raises(ledger.Conflict, match="gone"):
+        replay.order(acc, "BUY", "MARKET", 1)
+    with pytest.raises(ledger.Conflict, match="gone"):
+        replay.state(acc)

@@ -3,6 +3,7 @@
 import asyncio
 import csv
 import io
+import json
 import os
 import re
 import time
@@ -17,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import __version__, db, features, ledger, market, model, replay, settings
 from .worker import Worker
@@ -99,6 +100,13 @@ class SettingsIn(BaseModel):
     account_id: int | None = None
     chart: dict | None = None
     lab: dict | None = None
+
+    @field_validator("chart", "lab")
+    @classmethod
+    def small_enough(cls, value):
+        if value is not None and len(json.dumps(value)) > 20_000:
+            raise ValueError("too big to store as a setting")
+        return value
 
 
 class IndicatorsIn(BaseModel):
@@ -355,7 +363,7 @@ def create_app(run_worker=True):
         base_b = next((b for b in bench if b), None)
         return {
             "t": t, "equity_cents": values,
-            "equity_index": [round(v / values[0] * 100, 3) for v in values],
+            "equity_index": [round(v / values[0] * 100, 3) if values[0] > 0 else None for v in values],
             "benchmark": "SPY",
             "benchmark_index": [round(b / base_b * 100, 3) if b and base_b else None for b in bench],
         }
@@ -372,7 +380,7 @@ def create_app(run_worker=True):
         spy = curve["benchmark_index"]
         return {
             **card,
-            "max_drawdown": ledger.max_drawdown(curve["equity_cents"]),
+            "max_drawdown": ledger.max_drawdown(curve["equity_cents"], ledger.account(account_id)["starting_cash_cents"]),
             "since": curve["t"][0],
             "return": curve["equity_index"][-1] / 100 - 1,
             "spy_return": spy[-1] / 100 - 1 if spy[-1] else None,
@@ -637,6 +645,8 @@ def create_app(run_worker=True):
         changes = body.model_dump(exclude_unset=True, exclude_none=True)  # a null would wipe out the default
         if changes.get("account_id") is not None:
             ledger.live_only(changes["account_id"])
+            if ledger.account(changes["account_id"])["archived_at"] is not None:
+                raise ledger.Conflict("That portfolio was reset, so it can't be the one you trade in.")
         return settings.update(changes)
 
     @app.get("/status", tags=["app"])

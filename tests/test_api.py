@@ -138,6 +138,12 @@ def test_settings_are_checked(client):
     assert client.put("/settings", json={"commission_cents": None}).json()["commission_cents"] == 0
 
 
+def test_chart_and_lab_settings_have_a_size_cap(client):
+    assert client.put("/settings", json={"chart": {"x": "a" * 30_000}}).status_code == 422
+    assert client.put("/settings", json={"lab": {"x": "a" * 30_000}}).status_code == 422
+    assert client.put("/settings", json={"chart": {"x": 1}}).status_code == 200
+
+
 def test_chart_lines_up_with_its_bars(client):
     acc = open_account(client)
     market_order(client, acc, 1)
@@ -231,3 +237,16 @@ def test_selling_short_takes_its_flag(client):
     assert client.post("/orders/execute", json=body).status_code == 200
     held = client.get(f"/portfolio/{acc}").json()
     assert (held["positions"][0]["shares"], held["buying_power_cents"]) == (-10, 1_000_000 + 150_000 - 225_000)
+
+
+def test_a_reset_portfolio_cannot_be_the_active_one(client):
+    acc = open_account(client)
+    client.post(f"/accounts/{acc}/reset", json={"starting_cash_cents": 50_000})
+    assert client.put("/settings", json={"account_id": acc}).status_code == 409
+
+
+def test_equity_index_survives_a_portfolio_that_starts_at_zero(client, monkeypatch):
+    acc = open_account(client)
+    monkeypatch.setattr(ledger, "equity_curve", lambda *a: [0, 0])
+    body = client.get(f"/portfolio/{acc}/equity").json()
+    assert body["equity_index"][0] is None

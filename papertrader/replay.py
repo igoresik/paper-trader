@@ -32,7 +32,10 @@ def order(account_id, side, kind, shares, limit_cents=None, stop_cents=None, sho
     acct = _replay(account_id)
     if acct["archived_at"] is not None:
         raise ledger.Conflict("This replay was closed.")
-    close = _bars(acct["replay_symbol"], acct["replay_at"] - 1, acct["replay_at"])[0]["close"]
+    played = _bars(acct["replay_symbol"], acct["replay_at"] - 1, acct["replay_at"])
+    if not played:
+        raise ledger.Conflict(f"{acct['replay_symbol']}'s prices for this replay are gone, so it can't take orders.")
+    close = played[0]["close"]
     return ledger.place_order(account_id, acct["replay_symbol"], side, kind, shares, limit_cents, stop_cents,
                               ref_price_cents=close, costs=settings.costs(), now=market.session_close(acct["replay_at"]),
                               short=short)
@@ -55,6 +58,8 @@ def state(account_id):
     acct = _replay(account_id)
     symbol, clock = acct["replay_symbol"], acct["replay_at"]
     seen = _bars(symbol, acct["created_at"] - 1, clock)
+    if not seen:
+        raise ledger.Conflict(f"{symbol}'s prices for this replay are gone, so it can't be shown.")
     closes = {b["ts"]: b["close"] for b in seen}
     last, prev = seen[-1]["close"], seen[-2]["close"] if len(seen) > 1 else seen[-1]["close"]
     days = [(b["ts"], market.session_close(b["ts"])) for b in seen]
@@ -66,7 +71,7 @@ def state(account_id):
         "orders": ledger.orders(account_id),
         "report": {
             **ledger.report_card(account_id, days, lambda s, day: closes.get(day)),
-            "max_drawdown": ledger.max_drawdown(values),
+            "max_drawdown": ledger.max_drawdown(values, acct["starting_cash_cents"]),
             "since": acct["created_at"],
             "return": values[-1] / acct["starting_cash_cents"] - 1,
             "benchmark_return": last / seen[0]["close"] - 1,  # bought on the first day and held

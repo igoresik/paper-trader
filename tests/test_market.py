@@ -146,3 +146,11 @@ def test_a_series_yahoo_did_not_send_is_left_out(monkeypatch):
     with pytest.raises(market.MarketError):
         market.refresh_context(now=ny(2026, 10, 8, 12))
     assert list(market.context([ny(2026, 10, 5)], "1d").columns) == ["yield_change"]  # the yield still arrived
+
+
+def test_refresh_skips_a_bar_with_a_missing_open(monkeypatch):
+    frame = daily(["2026-10-13", "2026-10-14", "2026-10-15"], [100.0, 101.0, 102.0])
+    frame.loc[frame.index[1], "Open"] = np.nan
+    serve(monkeypatch, frame)
+    assert market.refresh("spy", "1d", now=ny(2026, 10, 16, 15)) == 2
+    assert closes() == [10_000, 10_200]

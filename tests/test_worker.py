@@ -156,3 +156,11 @@ def test_a_failed_split_check_waits_before_trying_again(monkeypatch):
     worker.split_retry_at["AAPL"] = 0
     worker.check_splits("AAPL")
     assert calls == ["AAPL", "AAPL"]
+
+
+def test_a_reset_portfolio_no_longer_streams_its_symbols():
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.execute_market(acc, "AAPL", "BUY", 1, 1_000)
+    assert "AAPL" in Worker(lambda event: None).symbols()
+    ledger.reset_account(acc, 100_000)
+    assert "AAPL" not in Worker(lambda event: None).symbols()
