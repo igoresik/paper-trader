@@ -217,6 +217,10 @@ def split_factor(symbol):
 CONTEXT = ("^VIX", "^TNX")
 
 
+def context_needs_refresh(now=None):
+    return any(needs_refresh(symbol, "1d", now) for symbol in CONTEXT)
+
+
 def refresh_context(now=None):
     """Download the context series' daily history, stored as bars by New York day start like every daily bar."""
     now, failed = now or int(time.time()), None

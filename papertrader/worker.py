@@ -134,7 +134,7 @@ class Worker:
 
     def update_context(self):
         """The VIX and the 10-year yield, which the models read alongside each symbol's own bars."""
-        if market.needs_refresh(market.CONTEXT[0], "1d"):
+        if market.context_needs_refresh():
             market.refresh_context()
 
     def update_history(self, symbol):
