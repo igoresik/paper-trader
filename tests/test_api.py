@@ -250,3 +250,13 @@ def test_equity_index_survives_a_portfolio_that_starts_at_zero(client, monkeypat
     monkeypatch.setattr(ledger, "equity_curve", lambda *a: [0, 0])
     body = client.get(f"/portfolio/{acc}/equity").json()
     assert body["equity_index"][0] is None
+
+
+def test_report_card_survives_a_portfolio_that_starts_at_zero(client, put_bars, monkeypatch):
+    put_bars("SPY", *walk())
+    acc = open_account(client)
+    with db.tx() as conn:
+        conn.execute("UPDATE accounts SET created_at = 0 WHERE id = ?", (acc,))
+    monkeypatch.setattr(ledger, "equity_curve", lambda acct, days, close_on: [0] * len(days))
+    res = client.get(f"/portfolio/{acc}/report")
+    assert res.status_code == 200 and res.json()["return"] is None

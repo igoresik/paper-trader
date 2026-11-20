@@ -382,7 +382,7 @@ def create_app(run_worker=True):
             **card,
             "max_drawdown": ledger.max_drawdown(curve["equity_cents"], ledger.account(account_id)["starting_cash_cents"]),
             "since": curve["t"][0],
-            "return": curve["equity_index"][-1] / 100 - 1,
+            "return": curve["equity_index"][-1] / 100 - 1 if curve["equity_index"][-1] is not None else None,
             "spy_return": spy[-1] / 100 - 1 if spy[-1] else None,
             "model": model.follow("SPY", curve["t"][0]),
         }
