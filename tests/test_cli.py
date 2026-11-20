@@ -1,9 +1,10 @@
 import sys
 
+import pandas as pd
 import pytest
 
 from papertrader import __main__ as cli
-from papertrader import market, model
+from papertrader import features, market, model
 
 
 @pytest.mark.parametrize("horizon", ["0", "21"])
@@ -32,3 +33,12 @@ def test_train_downloads_the_market_context_it_reads(monkeypatch):
     with pytest.raises(SystemExit):
         cli.main()
     assert tested == [["context"]]
+
+
+def test_ingest_says_so_when_there_are_too_few_bars_for_the_indicators(monkeypatch):
+    monkeypatch.setattr(market, "refresh", lambda symbol, interval: 10)
+    monkeypatch.setattr(features, "build", lambda symbol, interval: pd.DataFrame({"rsi": [None] * 10}))
+    monkeypatch.setattr(sys, "argv", ["papertrader", "ingest", "NEWCO"])
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert "not enough" in str(stopped.value)
