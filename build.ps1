@@ -1,5 +1,5 @@
 # Builds dist\PaperTrader-Setup-<version>.exe. Run from the project folder on Windows.
-# CI builds it with Node 26 and a Python 3.15 venv in .venv; needs and Inno Setup 6 (winget install JRSoftware.InnoSetup).
+# CI builds it with Node 26 and a Python 3.15 venv in .venv; needs Inno Setup 6 (winget install JRSoftware.InnoSetup).
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 
