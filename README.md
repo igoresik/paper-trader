@@ -210,7 +210,7 @@ A price from Yahoo's stream reaches the worker, which fills any waiting order it
 
 ## Safety
 
-- **Only this computer can reach the app.** Its server answers on 127.0.0.1 only, on a new port each start.
+- **Only this computer can reach the app.** Its server answers on 127.0.0.1 only. The desktop app picks a free port each start; `serve` and Docker use 8000 unless you change it.
 - **Websites can't get in through a trick domain.** A website you visit can't reach it by pointing its own domain at your computer: requests addressed to any other host are refused.
 - **Websites can't place orders or change anything.** Orders are only accepted as JSON, which browsers don't send across sites without permission, and the app gives none. Any request that changes something is also refused when it comes from another site's page.
 - **Websites can't listen to the live updates.** The live-update connection checks which page opened it.
