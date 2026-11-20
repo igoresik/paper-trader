@@ -148,6 +148,24 @@ def test_a_series_yahoo_did_not_send_is_left_out(monkeypatch):
     assert list(market.context([ny(2026, 10, 5)], "1d").columns) == ["yield_change"]  # the yield still arrived
 
 
+def test_a_failed_yield_download_is_tried_again(monkeypatch):
+    days = ["2026-10-05", "2026-10-06", "2026-10-07"]
+    now = ny(2026, 10, 8, 12)
+
+    class TimedOut:
+        def history(self, **kw):
+            raise ConnectionError("timed out")
+
+    broken = {"^TNX"}
+    monkeypatch.setattr(market, "_ticker", lambda symbol: TimedOut() if symbol in broken else FakeTicker(daily(days, [10.0, 11.0, 12.0]), {}))
+    with pytest.raises(market.MarketError):
+        market.refresh_context(now=now)
+    assert market.context_needs_refresh(now)  # the VIX is fresh, the yield is not
+    broken.clear()
+    market.refresh_context(now=now)
+    assert not market.context_needs_refresh(now)
+
+
 def test_refresh_skips_a_bar_with_a_missing_open(monkeypatch):
     frame = daily(["2026-10-13", "2026-10-14", "2026-10-15"], [100.0, 101.0, 102.0])
     frame.loc[frame.index[1], "Open"] = np.nan

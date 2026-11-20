@@ -20,7 +20,7 @@ def test_train_refuses_a_horizon_the_api_would_refuse(monkeypatch, horizon):
 
 def test_train_downloads_the_market_context_it_reads(monkeypatch):
     fetched, tested = [], []
-    monkeypatch.setattr(market, "needs_refresh", lambda symbol, interval: symbol == "^VIX")
+    monkeypatch.setattr(market, "needs_refresh", lambda symbol, interval, now=None: symbol == "^VIX")
     monkeypatch.setattr(market, "refresh_context", lambda: fetched.append("context"))
 
     def validate(symbol, p):
