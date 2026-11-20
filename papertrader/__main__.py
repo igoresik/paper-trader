@@ -12,6 +12,8 @@ def ingest(args):
     symbol = market.clean(args.symbol)
     stored = market.refresh(symbol, args.interval)
     table = features.build(symbol, args.interval).dropna()
+    if table.empty:
+        sys.exit(f"{symbol} {args.interval}: {stored} bars stored, not enough for the indicators yet.")
     first, last = (datetime.fromtimestamp(ts, market.NY).strftime("%Y-%m-%d %H:%M") for ts in table.index[[0, -1]])
     print(f"{symbol} {args.interval}: {stored} bars stored, features for {len(table)} of them ({first} to {last})")
     print("latest:", ", ".join(f"{name} {value:.4f}" for name, value in table.iloc[-1].items()))
