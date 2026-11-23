@@ -29,6 +29,12 @@ def decode(raw):
     return MessageToDict(data, preserving_proto_field_name=True)
 
 
+def tagged(kind, row):
+    """A live event for the open windows. A fill or order row has its own `type` (MARKET, LIMIT, STOP),
+    which must not replace the event kind, so it travels as `order_type`."""
+    return {**row, "order_type": row.get("type"), "type": kind}
+
+
 class Worker:
     def __init__(self, publish):
         self.publish = publish  # thread-safe hand-off to every open window
@@ -234,7 +240,7 @@ class Worker:
     def match(self, symbol, bars):
         events = ledger.match(symbol, bars, settings.costs())
         for event in events:
-            self.publish({"type": "fill" if "price_cents" in event else "rejected", **event})
+            self.publish(tagged("fill" if "price_cents" in event else "rejected", event))
         if events:
             self.orders_changed()
 
