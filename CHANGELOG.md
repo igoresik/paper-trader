@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Fixes since 1.4.1:
+
+- **Live fills show up.** A limit, stop or queued market order that filled in the background, and orders placed or cancelled from another window, now refresh the portfolio and show a notice. The order's own type had replaced the kind of event, so the window ignored them.
+- **Splits.** A reverse split's leftover fraction is paid at the new price even before the history has been re-downloaded (a half share after a 1-for-10 split was paid at a tenth of its value). A failed split check waits a minute before trying again and no longer holds up fills.
+- **Yahoo gaps.** An empty answer from Yahoo no longer wipes the stored prices, the VIX or the yield. The app asks again after five minutes instead of on every click, and retries the yield download when only that one failed. Bars with a missing open, high or low are skipped instead of stopping the refresh. A failing symbol search turns on the Yahoo down banner like the other calls.
+- **Orders.** Limit and stop orders say they wait while the market is closed, like market orders already did.
+- **Charts and report card.** The equity curve and report card no longer fail when a first value or first close is zero. Drawdown starts from the starting cash, and the backtest drawdown counts a loss on the first bar. A day with no bar keeps the last close instead of valuing a holding at zero.
+- **Replay.** Closing a replay twice no longer changes when it closed, and stepping a closed one says so. Replay orders have the same size and price limits as live ones. Cancel and close show their errors, and a replay whose prices are gone says that instead of crashing. Closing a replay by a live portfolio's id no longer cancels its orders.
+- **Portfolios and watchlist.** Removing a symbol, or resetting a portfolio, stops streaming prices for it. A reset portfolio can't be picked as the active one.
+- **Models.** Two first signals at once no longer train two models. The backtest says it scores the next bar, even for barrier calls. Settings for charts and the lab are capped at 20 KB.
+- **Safety.** The app stops with a clear message if the database comes from a newer version.
+- Behind the scenes: tests also run on Python 3.12, the command line's `train` takes the same horizon and downloads the same context as the app, `ingest` says when a symbol has too few bars, and the README and build script notes match the versions CI uses.
+
 ## 1.4.1 (2026-11-03)
 
 - The installer is now built on Python 3.15 and Node 26, and the Docker image runs on them too.
