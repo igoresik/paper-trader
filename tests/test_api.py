@@ -88,6 +88,22 @@ def test_other_sites_cannot_listen_to_live_updates(client):
         assert ws.receive_json()["type"] == "hello"
 
 
+def test_live_events_keep_their_kind_and_carry_the_order_type(client):
+    acc = open_account(client, 1_000_000)
+    with client.websocket_connect("ws://127.0.0.1/ws", headers={"origin": "http://127.0.0.1:5173"}) as ws:
+        assert ws.receive_json()["type"] == "hello"
+        body = {"account_id": acc, "symbol": "AAPL", "side": "BUY", "type": "LIMIT", "shares": 1, "limit_cents": 10_000}
+        placed = client.post("/orders", json=body).json()
+        placed_event = ws.receive_json()
+        client.delete(f"/orders/{placed['id']}")
+        cancelled_event = ws.receive_json()
+        assert market_order(client, acc, 2).status_code == 200
+        fill_event = ws.receive_json()
+    assert (placed_event["type"], placed_event["order_type"], placed_event["id"]) == ("order", "LIMIT", placed["id"])
+    assert (cancelled_event["type"], cancelled_event["order_type"], cancelled_event["status"]) == ("order", "LIMIT", "CANCELLED")
+    assert (fill_event["type"], fill_event["order_type"], fill_event["shares"]) == ("fill", "MARKET", 2)
+
+
 def test_other_sites_cannot_change_anything(client):
     # a page elsewhere can still fire a plain POST at this computer, even if it can't read the answer
     refused = client.post("/models/runs/1/activate", headers={"origin": "http://evil.example"})
