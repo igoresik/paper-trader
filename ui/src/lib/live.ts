@@ -107,7 +107,8 @@ export function connect(client: QueryClient) {
         setStatus(event as unknown as Status);
         break;
       case "fill": {
-        const fill = event as unknown as Trade;
+        // on a live fill the row's own order type comes as order_type, because type names the event
+        const fill = event as unknown as Trade & { order_type: Trade["type"] };
         refresh(["portfolio"], ["orders"], ["history"], ["chart", fill.symbol], ["equity"]);
         // the event can beat the ticket's own HTTP reply; wait for it, so a fill shown as a receipt doesn't toast too
         setTimeout(() => {
@@ -115,7 +116,7 @@ export function connect(client: QueryClient) {
           toast.success(`${filled(fill)} ${shares(fill.shares)} ${fill.symbol} at ${money(fill.price_cents)}`, {
             description: fill.buy_in
               ? "Forced buy-in: the short's collateral was down to 130% of the cost of buying back."
-              : fill.type === "MARKET" ? "Your queued market order filled at the open." : `Your ${fill.type.toLowerCase()} order filled.`,
+              : fill.order_type === "MARKET" ? "Your queued market order filled at the open." : `Your ${fill.order_type.toLowerCase()} order filled.`,
           });
         }, 2_000);
         break;

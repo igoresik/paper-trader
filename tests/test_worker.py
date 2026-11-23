@@ -4,7 +4,7 @@ import time
 import pytest
 
 from papertrader import db, ledger, market
-from papertrader.worker import Worker
+from papertrader.worker import Worker, tagged
 
 OPEN = 1_792_416_600  # Monday 2026-10-19, 09:30 New York
 
@@ -62,6 +62,22 @@ def test_fills_dont_wait_behind_slow_background_work():
         assert wait_for(lambda: ledger.orders(acc, "FILLED"))
     finally:
         busy.set()
+
+
+def test_a_background_fill_is_published_as_a_fill_not_as_its_order_type():
+    acc = ledger.create_account("Main", 100_000)["id"]
+    ledger.place_order(acc, "AAPL", "BUY", "LIMIT", 1, limit_cents=10_000, now=OPEN - 60)
+    events = []
+    worker = Worker(events.append)
+    bar = {"ts": OPEN, "open": 9_900, "high": 9_900, "low": 9_900, "close": 9_900}
+    worker.match("AAPL", [bar])
+    [fill] = events
+    assert (fill["type"], fill["order_type"]) == ("fill", "LIMIT")
+
+
+def test_tagged_keeps_the_event_kind_and_carries_the_order_type():
+    event = tagged("order", {"id": 7, "type": "STOP", "symbol": "AAPL"})
+    assert event == {"id": 7, "symbol": "AAPL", "order_type": "STOP", "type": "order"}
 
 
 def test_ticks_that_arrive_mid_match_are_matched_together_next():

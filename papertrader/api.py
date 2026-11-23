@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import __version__, db, features, ledger, market, model, replay, settings
-from .worker import Worker
+from .worker import Worker, tagged
 
 Side = Literal["BUY", "SELL"]
 Cents = Annotated[int, Field(gt=0, le=10**12)]
@@ -409,12 +409,12 @@ def create_app(run_worker=True):
                                        ref_price_cents=last, costs=costs, short=body.short)
             worker.orders_changed()
             worker.watch(symbol)
-            hub.publish({"type": "order", **order})
+            hub.publish(tagged("order", order))
             return JSONResponse({**order, "queued": True}, status_code=202)
         receipt = ledger.execute_market(body.account_id, symbol, body.side, body.shares, price, costs, short=body.short)
         worker.orders_changed()  # a short now open needs its buy-in watched
         worker.watch(symbol)
-        hub.publish({"type": "fill", **receipt})
+        hub.publish(tagged("fill", receipt))
         return {**receipt, "practice": practice}
 
     @app.post("/orders", status_code=201, tags=["orders"])
@@ -428,7 +428,7 @@ def create_app(run_worker=True):
                                    short=body.short)
         worker.orders_changed()
         worker.watch(symbol)
-        hub.publish({"type": "order", **order})
+        hub.publish(tagged("order", order))
         return order
 
     @app.get("/orders", tags=["orders"])
@@ -439,7 +439,7 @@ def create_app(run_worker=True):
     def cancel_order(order_id: int):
         order = ledger.cancel_order(order_id)
         worker.orders_changed()
-        hub.publish({"type": "order", **order})
+        hub.publish(tagged("order", order))
         return order
 
     # market data and the model
