@@ -164,12 +164,14 @@ export function Ticket({ portfolio, lastPrice }: { portfolio: Portfolio | undefi
     setQty(String(Math.max(0, Math.floor((portfolio.buying_power_cents * fraction - settings.commission_cents) / unit))));
   };
 
-  const closedNote =
-    type === "MARKET" && !status.live
-      ? settings.practice_mode
+  // limit and stop orders only fill on live prices, so they wait too (and practice mode doesn't apply to them)
+  const closedNote = status.live
+    ? null
+    : type !== "MARKET"
+      ? `Market closed: this ${type.toLowerCase()} order waits and can fill once trading opens.`
+      : settings.practice_mode
         ? "Market closed: Practice mode fills this now at the last price."
-        : "Market closed: this order waits and fills at the next open."
-      : null;
+        : "Market closed: this order waits and fills at the next open.";
 
   return (
     <div>
