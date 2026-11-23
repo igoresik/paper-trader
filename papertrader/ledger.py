@@ -536,7 +536,7 @@ def _whole(x):
 
 def apply_splits(symbol, now=None):
     """Put every portfolio and open order on the new share count of each split not applied yet. Shares held
-    through the split multiply, a leftover fraction is paid in cash at the last close, and open orders keep
+    through the split multiply, a leftover fraction is paid in cash at the last close (per new share), and open orders keep
     their value. Shares traded since the split began are already on the new count."""
     now, changes = now or _now(), []
     if not db.query("SELECT 1 FROM splits WHERE symbol = ? AND applied_at IS NULL", (symbol,)):
@@ -547,6 +547,12 @@ def apply_splits(symbol, now=None):
             ts, ratio, name = split["ts"], split["ratio"], _split_name(split["ratio"])
             last = _rows(conn, "SELECT close_cents FROM bars WHERE symbol = ? AND interval = '1d' AND ts < ?"
                                " ORDER BY ts DESC LIMIT 1", (symbol, ts))
+            fetched = _rows(conn, "SELECT fetched_at FROM fetches WHERE symbol = ? AND interval = '1d'", (symbol,))
+            # Yahoo re-adjusts old bars once the split is live. Bars fetched before the open are still on the old
+            # share count, so the last close is divided by the ratio to be a price per new share.
+            close = last[0]["close_cents"] if last else 0
+            if fetched and fetched[0]["fetched_at"] < market.session_open(ts):
+                close = close / ratio
             # replays trade on bars that are already split-adjusted, so only live portfolios move
             for pos in _rows(conn, "SELECT p.* FROM positions p JOIN accounts a ON a.id = p.account_id"
                                    " WHERE p.symbol = ? AND a.replay_at IS NULL", (symbol,)):
@@ -559,7 +565,7 @@ def apply_splits(symbol, now=None):
                 # a short rounds down too: it owes the fraction more and gets its value, as if sold short at the last close
                 exact = before * ratio
                 after = _whole(exact)
-                cash = int((exact - after) * last[0]["close_cents"]) if last else 0
+                cash = int((exact - after) * close)
                 if after + since:
                     basis = pos["cost_basis_cents"] - int(pos["cost_basis_cents"] * (exact - after) / (exact + since))
                     conn.execute("UPDATE positions SET shares = ?, cost_basis_cents = ? WHERE account_id = ? AND symbol = ?",

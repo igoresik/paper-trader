@@ -4,7 +4,7 @@ from contextlib import closing
 
 import pytest
 
-from papertrader import db, ledger
+from papertrader import db, ledger, market
 from papertrader.ledger import Conflict, Costs, InsufficientFunds, NotEnoughShares
 
 T0 = 1_760_000_000  # fixed clock for orders and bars
@@ -359,6 +359,34 @@ def test_a_reverse_split_pays_the_leftover_fraction_in_cash(put_bars):
     assert cancelled["id"] == order["id"] and "1-for-10" in cancelled["reason"]
     days = [(T0, T0 + 1_000), (T0 + 86_400, T0 + 87_400)]
     assert ledger.equity_curve(acc, days, lambda symbol, day: 10_000) == [100_000, 100_000]
+
+
+def _fetched(at, symbol="AAPL"):
+    with db.tx() as conn:
+        conn.execute("INSERT INTO fetches VALUES (?, '1d', ?)", (symbol, at))
+
+
+def test_a_reverse_split_values_the_fraction_per_new_share_when_bars_are_not_adjusted_yet(put_bars):
+    put_bars("AAPL", [10.0], start=T0)  # still the old-count close: Yahoo hasn't re-adjusted yet
+    acc = account(100_000)
+    buy(acc, 15, 1_000, now=T0 + 100)
+    day = T0 + 86_400
+    split(day, 0.1)
+    _fetched(market.session_open(day) - 600)  # bars downloaded before the open of the split day
+    ledger.apply_splits("AAPL")
+    # half a new share is worth $50 at the new price of $100, not $5
+    assert ledger.account(acc)["cash_balance_cents"] == 100_000 - 15_000 + 5_000
+
+
+def test_a_reverse_split_keeps_the_close_when_bars_were_fetched_after_the_open(put_bars):
+    put_bars("AAPL", [100.0], start=T0)  # already adjusted
+    acc = account(100_000)
+    buy(acc, 15, 1_000, now=T0 + 100)
+    day = T0 + 86_400
+    split(day, 0.1)
+    _fetched(market.session_open(day) + 600)
+    ledger.apply_splits("AAPL")
+    assert ledger.account(acc)["cash_balance_cents"] == 100_000 - 15_000 + 5_000
 
 
 def test_shares_traded_after_a_split_began_stay_as_they_are():
