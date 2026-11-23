@@ -77,6 +77,20 @@ def test_an_empty_answer_from_yahoo_keeps_the_stored_bars(monkeypatch):
     assert market.needs_refresh("SPY", "1d", now=ny(2026, 10, 21, 18))
 
 
+def test_after_an_empty_answer_yahoo_is_left_alone_for_a_few_minutes(monkeypatch):
+    serve(monkeypatch, daily(["2026-10-13", "2026-10-14"], [200.0, 202.0]))
+    market.refresh("SPY", "1d", now=ny(2026, 10, 20, 12))
+    serve(monkeypatch, daily([], []))
+    later = ny(2026, 10, 21, 18)
+    assert market.needs_refresh("SPY", "1d", now=later)
+    assert market.refresh("SPY", "1d", now=later) == 0
+    assert not market.needs_refresh("SPY", "1d", now=later + market.RETRY - 1)
+    assert market.needs_refresh("SPY", "1d", now=later + market.RETRY)
+    serve(monkeypatch, daily(["2026-10-13", "2026-10-14", "2026-10-15"], [200.0, 202.0, 203.0]))
+    assert market.refresh("SPY", "1d", now=later + market.RETRY) == 3
+    assert not market.needs_refresh("SPY", "1d", now=later + market.RETRY + 60)
+
+
 @pytest.mark.parametrize(
     "meta", [{"currency": "EUR", "instrumentType": "EQUITY"}, {"currency": "USD", "instrumentType": "CRYPTOCURRENCY"}]
 )
