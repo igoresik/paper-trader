@@ -128,6 +128,18 @@ def test_market_context_is_lined_up_without_looking_ahead(monkeypatch):
     assert by_hour["vix"].iloc[0] == 16.0 and np.isnan(by_hour["vix"].iloc[1])  # an hour only sees the day before
 
 
+def test_an_empty_context_answer_keeps_the_stored_history(monkeypatch):
+    days = ["2026-10-13", "2026-10-14", "2026-10-15"]
+    stored = {"^VIX": daily(days, [20.0, 21.0, 22.0]), "^TNX": daily(days, [4.0, 4.1, 4.2])}
+    monkeypatch.setattr(market, "_ticker", lambda symbol: FakeTicker(stored[symbol], {}))
+    market.refresh_context(now=ny(2026, 10, 16, 20))
+    monkeypatch.setattr(market, "_ticker", lambda symbol: FakeTicker(daily([], []), {}))  # no error, no bars
+    market.refresh_context(now=ny(2026, 10, 19, 20))
+    count = lambda symbol: db.query("SELECT COUNT(*) AS n FROM bars WHERE symbol = ?", (symbol,))[0]["n"]
+    assert (count("^VIX"), count("^TNX")) == (3, 3)
+    assert market.context_needs_refresh(now=ny(2026, 10, 19, 21))
+
+
 def test_context_is_left_out_until_it_has_been_downloaded():
     assert market.context([ny(2026, 10, 7)], "1d") is None
 

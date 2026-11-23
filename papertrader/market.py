@@ -237,6 +237,8 @@ def refresh_context(now=None):
             day = day_start(int(r.Index.timestamp()))
             if is_complete(day, "1d", now) and not pd.isna(r.Close):
                 days[day] = (symbol, "1d", day, cents(r.Open), cents(r.High), cents(r.Low), cents(r.Close), 0)
+        if not days and db.query("SELECT 1 FROM bars WHERE symbol = ? AND interval = '1d' LIMIT 1", (symbol,)):
+            continue  # an empty answer must not wipe the history already stored; it is tried again next time
         with db.tx() as conn:
             conn.execute("DELETE FROM bars WHERE symbol = ? AND interval = '1d'", (symbol,))
             conn.executemany("INSERT INTO bars VALUES (?, ?, ?, ?, ?, ?, ?, ?)", list(days.values()))
