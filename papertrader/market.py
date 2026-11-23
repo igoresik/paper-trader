@@ -19,6 +19,8 @@ from . import db
 NY = ZoneInfo("America/New_York")
 CLOSE = clock(16, 0)
 SETTLE = 600  # Yahoo finalises a bar a few minutes after it ends
+RETRY = 300  # after an empty answer, wait this long before asking Yahoo again
+_retry_at = {}  # (symbol, interval) -> the time the next try is allowed; forgotten on restart
 # all the daily history there is: a model tested on 30 years of SPY did better in recent years too than one on 5;
 # 730 days is as far back as Yahoo serves hourly bars
 PERIODS = {"1d": "max", "1h": "730d"}
@@ -155,6 +157,8 @@ def last_bar_end(interval, now):
 
 def needs_refresh(symbol, interval, now=None):
     now = now or int(time.time())
+    if now < _retry_at.get((symbol, interval), 0):
+        return False
     rows = db.query("SELECT fetched_at FROM fetches WHERE symbol = ? AND interval = ?", (symbol, interval))
     return not rows or rows[0]["fetched_at"] < last_bar_end(interval, now) + SETTLE
 
@@ -172,7 +176,8 @@ def refresh(symbol, interval="1d", now=None):
         if is_complete(ts := int(r.Index.timestamp()), interval, now) and not any(pd.isna(v) for v in (r.Open, r.High, r.Low, r.Close, r.Volume))
     ]
     if not rows and db.query("SELECT 1 FROM bars WHERE symbol = ? AND interval = ? LIMIT 1", (symbol, interval)):
-        return 0  # an empty answer must not wipe the history already stored; it is tried again next time
+        _retry_at[(symbol, interval)] = now + RETRY
+        return 0  # an empty answer must not wipe the history already stored; it is tried again after RETRY
     with db.tx() as conn:
         conn.execute(
             "INSERT INTO symbols (symbol, name, exchange, kind, currency) VALUES (:symbol, :name, :exchange, :kind, :currency)"
@@ -187,6 +192,7 @@ def refresh(symbol, interval="1d", now=None):
             "INSERT INTO fetches VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET fetched_at = excluded.fetched_at",
             (symbol, interval, now),
         )
+    _retry_at.pop((symbol, interval), None)
     return len(rows)
 
 
@@ -238,7 +244,8 @@ def refresh_context(now=None):
             if is_complete(day, "1d", now) and not pd.isna(r.Close):
                 days[day] = (symbol, "1d", day, cents(r.Open), cents(r.High), cents(r.Low), cents(r.Close), 0)
         if not days and db.query("SELECT 1 FROM bars WHERE symbol = ? AND interval = '1d' LIMIT 1", (symbol,)):
-            continue  # an empty answer must not wipe the history already stored; it is tried again next time
+            _retry_at[(symbol, "1d")] = now + RETRY
+            continue  # an empty answer must not wipe the history already stored; it is tried again after RETRY
         with db.tx() as conn:
             conn.execute("DELETE FROM bars WHERE symbol = ? AND interval = '1d'", (symbol,))
             conn.executemany("INSERT INTO bars VALUES (?, ?, ?, ?, ?, ?, ?, ?)", list(days.values()))

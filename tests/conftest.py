@@ -1,6 +1,6 @@
 import pytest
 
-from papertrader import db, model
+from papertrader import db, market, model
 
 
 @pytest.fixture(autouse=True)
@@ -9,6 +9,7 @@ def fresh_db(tmp_path, monkeypatch):
     db.init()
     model._fitted.clear()  # keyed by model id, which every fresh database starts again at 1
     model.latest.clear()
+    market._retry_at.clear()
 
 
 @pytest.fixture
