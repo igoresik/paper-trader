@@ -8,10 +8,11 @@ import { api, ApiError, type Portfolio, type Settings, type Trade } from "../lib
 import { Ticket } from "./Ticket";
 
 const desk = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const market = vi.hoisted(() => ({ live: true }));
 vi.mock("../desk", () => ({ useDesk: () => desk.current }));
 vi.mock("../lib/live", () => ({
   useQuote: () => ({ symbol: "AAPL", session: "regular", price_cents: 10_003 }), // $100.03, so every rounding shows
-  useStatus: () => ({ live: true }),
+  useStatus: () => ({ live: market.live }),
   markShown: vi.fn(),
 }));
 
@@ -38,7 +39,10 @@ const ticket = () => within(screen.getByRole("form", { name: "Order ticket" }));
 const submit = () => ticket().getAllByRole("button").find((b) => b.getAttribute("type") === "submit")!;
 const shown = (term: string) => ticket().getByText(term).nextElementSibling?.textContent;
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  market.live = true;
+});
 afterEach(cleanup);
 
 describe("Ticket", () => {
@@ -120,6 +124,22 @@ describe("Ticket", () => {
     await user.click(submit());
     await user.click(submit());
     expect(execute).toHaveBeenCalledWith(1, "AAPL", "BUY", 100, false);
+  });
+
+  it("says a limit or stop order waits too while the market is closed", async () => {
+    market.live = false;
+    const user = show();
+    expect(ticket().getByText("Market closed: this order waits and fills at the next open.")).toBeTruthy();
+    await user.click(ticket().getByRole("radio", { name: "Limit" }));
+    expect(ticket().getByText("Market closed: this limit order waits and can fill once trading opens.")).toBeTruthy();
+    await user.click(ticket().getByRole("radio", { name: "Stop" }));
+    expect(ticket().getByText("Market closed: this stop order waits and can fill once trading opens.")).toBeTruthy();
+  });
+
+  it("shows no market-closed note while trading is live", async () => {
+    const user = show();
+    await user.click(ticket().getByRole("radio", { name: "Limit" }));
+    expect(ticket().queryByText(/Market closed/)).toBeNull();
   });
 
   it("shows why the engine refused an order", async () => {
