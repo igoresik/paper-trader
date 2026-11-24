@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import __version__, db, features, ledger, market, model, replay, settings
+from . import __version__, db, discover, features, ledger, market, model, replay, settings
 from .worker import Worker, tagged
 
 Side = Literal["BUY", "SELL"]
@@ -449,6 +449,12 @@ def create_app(run_worker=True):
     @app.get("/market/search", tags=["market"])
     def search(q: Annotated[str, Query(min_length=1, max_length=40)]):
         return market.search(q)
+
+    @app.get("/discover", tags=["market"])
+    def browse():
+        """The curated stocks and ETFs with price, day, month and year change and a month of closes, plus their
+        categories. One Yahoo download covers the whole list and is reused for ten minutes."""
+        return discover.snapshot()
 
     @app.get("/market/{symbol}/signal", tags=["market"])
     def signal(symbol: str, interval: Literal["1d", "1h"] = "1d"):

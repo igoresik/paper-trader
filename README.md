@@ -46,6 +46,7 @@ Good to know:
   - Two moving averages, Bollinger bands, volume, RSI and MACD.
   - Your fills, your average cost and your open orders, drawn on the chart.
   - Every choice is remembered.
+- **Discover:** browse about 150 US stocks and ETFs by category, with price, change and a mini chart, sorted by popularity, gainers, losers, 1 month or 1 year, and add one to the watchlist in a click.
 - **Portfolios:** several of them. A reset keeps the old one as a read-only record. Positions show live profit and loss, the equity curve is compared with SPY, and the trade ledger can be paged, filtered and exported to CSV.
 - **Report card:** the honest test the model gets, applied to you: how many closed trades (sales and buy-backs) made money, average win and loss, your biggest drop, what commission and slippage cost you, how often you were in the market, and how SPY and SPY's model did over the same days.
 - **Replay:** trade a symbol's past one day at a time, seeing only the days up to the replay's date. A year takes an afternoon instead of a year, and the report card compares you with buying and holding and with the model's out-of-sample calls for the same days.

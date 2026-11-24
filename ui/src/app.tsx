@@ -7,6 +7,7 @@ import { TopBar } from "./components/TopBar";
 import { DeskProvider, useDesk, useSettings } from "./desk";
 import { api } from "./lib/api";
 import { useStatus } from "./lib/live";
+import { Discover } from "./views/Discover";
 import { ModelLab } from "./views/ModelLab";
 import { PortfolioView } from "./views/Portfolio";
 import { Replay } from "./views/Replay";
@@ -40,6 +41,7 @@ function Desk() {
       <YahooDown />
       <main className="min-h-0 flex-1">
         {view === "trade" && <Trade portfolio={portfolio} />}
+        {view === "discover" && <Discover />}
         {view === "portfolio" && <PortfolioView portfolio={portfolio} />}
         {view === "replay" && <Replay />}
         {view === "lab" && <ModelLab />}

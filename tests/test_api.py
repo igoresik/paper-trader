@@ -1,11 +1,12 @@
 import time
 
 import numpy as np
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from papertrader import api, db, ledger, market
+from papertrader import api, db, discover, ledger, market
 
 
 def walk(n=400, seed=0):
@@ -276,6 +277,17 @@ def test_report_card_survives_a_portfolio_that_starts_at_zero(client, put_bars, 
     monkeypatch.setattr(ledger, "equity_curve", lambda acct, days, close_on: [0] * len(days))
     res = client.get(f"/portfolio/{acc}/report")
     assert res.status_code == 200 and res.json()["return"] is None
+
+
+def test_discover_serves_the_curated_list_with_its_categories(client, monkeypatch):
+    closes = pd.DataFrame({("AAPL", f): [10.0, 11.0] for f in ("Open", "High", "Low", "Close", "Volume")},
+                          index=pd.bdate_range("2026-01-01", periods=2))
+    monkeypatch.setattr(discover, "_download", lambda symbols: closes)
+    discover._kept.update(at=0.0, items=[])
+    body = client.get("/discover").json()
+    assert [i["symbol"] for i in body["items"]] == ["AAPL"]
+    assert body["items"][0]["categories"] == ["tech"]
+    assert body["categories"][0]["id"] == "tech"
 
 
 def test_ids_too_big_for_the_database_are_refused_not_crashed(client):

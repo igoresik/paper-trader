@@ -100,6 +100,24 @@ export interface WatchItem {
   signal: { signal: Call; confidence: number; ts: number; clear: boolean } | null;
 }
 
+export interface DiscoverItem {
+  symbol: string;
+  name: string;
+  kind: "EQUITY" | "ETF";
+  categories: string[];
+  price_cents: number;
+  day: number;
+  month: number | null;
+  year: number | null;
+  spark: number[];
+}
+
+export interface Discover {
+  updated: number;
+  categories: { id: string; label: string; blurb: string; count: number }[];
+  items: DiscoverItem[];
+}
+
 export interface Scores {
   accuracy: number;
   balanced_accuracy: number;
@@ -426,6 +444,7 @@ export const api = {
     call<Order>("POST", `/replays/${id}/orders`, body),
   stepReplay: (id: number, days: number) => call<{ fills: Trade[]; state: ReplayState }>("POST", `/replays/${id}/step`, { days }),
   closeReplay: (id: number) => call<void>("DELETE", `/replays/${id}`),
+  discover: () => call<Discover>("GET", "/discover"),
   watchlist: () => call<WatchItem[]>("GET", "/watchlist"),
   watch: (symbol: string) => call<WatchItem>("POST", "/watchlist", { symbol }),
   unwatch: (symbol: string) => call<void>("DELETE", `/watchlist/${symbol}`),

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+New since 1.4.1:
+
+- **Discover.** A new view to find something to trade without knowing its ticker: about 150 US stocks and ETFs in twelve categories (big tech, AI and chips, banks, health, cars, dividend payers, ETFs and more), each with its price, today's, 1-month and 1-year change and a month-long chart. Filter by name, show only stocks or ETFs, sort by popularity, gainers, losers, 1 month or 1 year, add to the watchlist or open the chart in one click. Symbols you watch show the model's call.
+
 Fixes since 1.4.1:
 
 - **Live fills show up.** A limit, stop or queued market order that filled in the background, and orders placed or cancelled from another window, now refresh the portfolio and show a notice. The order's own type had replaced the kind of event, so the window ignored them.
