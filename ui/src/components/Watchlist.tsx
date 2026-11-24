@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircle, Search, X } from "lucide-react";
+import { Compass, LoaderCircle, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -165,7 +165,7 @@ function Row({ item, selected, onSelect, onRemove }: { item: WatchItem; selected
 }
 
 export function Watchlist() {
-  const { symbol, setSymbol } = useDesk();
+  const { symbol, setSymbol, setView } = useDesk();
   const client = useQueryClient();
   const { data: items = [], isLoading } = useQuery({ queryKey: ["watchlist"], queryFn: api.watchlist, refetchInterval: 60_000 });
   useEffect(() => items.forEach((i) => watch(i.symbol)), [items]);
@@ -188,6 +188,13 @@ export function Watchlist() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="p-3 pb-2">
         <SymbolSearch onPick={(s) => (items.some((i) => i.symbol === s) ? setSymbol(s) : add.mutate(s))} busy={add.isPending} />
+        <button
+          type="button"
+          onClick={() => setView("discover")}
+          className="mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-rule text-[13px] font-medium text-ink-2 hover:border-buy hover:text-buy"
+        >
+          <Compass className="size-3.5" /> Discover stocks
+        </button>
       </div>
       <h2 className="px-3 pb-1 text-[11px] font-medium text-ink-3">Watchlist</h2>
       <ul className="min-h-0 flex-1 overflow-auto pb-2">
