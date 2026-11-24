@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Path, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,8 @@ from . import __version__, db, features, ledger, market, model, replay, settings
 from .worker import Worker, tagged
 
 Side = Literal["BUY", "SELL"]
+MAX_ID = 2**62  # SQLite INTEGER is signed 64-bit; anything near it overflows the bind
+RowId = Annotated[int, Path(le=MAX_ID)]
 Cents = Annotated[int, Field(gt=0, le=10**12)]
 Shares = Annotated[int, Field(gt=0, le=10**7)]
 Name = Annotated[str, Field(min_length=1, max_length=40)]
@@ -47,7 +49,7 @@ class ResetIn(BaseModel):
 
 class MarketOrderIn(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [{"account_id": 1, "symbol": "AAPL", "side": "BUY", "shares": 10}]})
-    account_id: int
+    account_id: Annotated[int, Field(le=MAX_ID)]
     symbol: str
     side: Side
     shares: Shares
@@ -70,7 +72,7 @@ class ReorderIn(BaseModel):
 
 class ReplayIn(BaseModel):
     symbol: str
-    start: Annotated[int, Field(gt=0)]  # unix seconds; the replay starts on the first trading day from then
+    start: Annotated[int, Field(gt=0, le=MAX_ID)]  # unix seconds; the replay starts on the first trading day from then
     starting_cash_cents: Annotated[int, Field(gt=0, le=1_000_000_000_00)] = 100_000_00
 
 
@@ -97,7 +99,7 @@ class SettingsIn(BaseModel):
     check_updates: bool | None = None
     theme: Literal["system", "dark", "light"] | None = None
     updown: Literal["green-red", "red-green", "blue-orange"] | None = None
-    account_id: int | None = None
+    account_id: Annotated[int, Field(le=MAX_ID)] | None = None
     chart: dict | None = None
     lab: dict | None = None
 
@@ -263,11 +265,11 @@ def create_app(run_worker=True):
         return acct
 
     @app.patch("/accounts/{account_id}", tags=["portfolio"])
-    def rename_account(account_id: int, body: RenameIn):
+    def rename_account(account_id: RowId, body: RenameIn):
         return ledger.rename_account(account_id, body.name)
 
     @app.post("/accounts/{account_id}/reset", tags=["portfolio"])
-    def reset_account(account_id: int, body: ResetIn):
+    def reset_account(account_id: RowId, body: ResetIn):
         """Archive the portfolio (its history stays readable) and start a fresh one under the same name."""
         ledger.live_only(account_id)
         fresh = ledger.reset_account(account_id, body.starting_cash_cents)
@@ -277,13 +279,13 @@ def create_app(run_worker=True):
         return fresh
 
     @app.get("/portfolio/{account_id}", tags=["portfolio"])
-    def portfolio(account_id: int):
+    def portfolio(account_id: RowId):
         """Cash, positions with unrealized profit and loss in cents, total value and buying power."""
         return ledger.portfolio(account_id, worker.price, worker.prev_close, worker.day_start())
 
     @app.get("/portfolio/{account_id}/history", tags=["portfolio"])
     def history(
-        account_id: int, page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=500)] = 50,
+        account_id: RowId, page: Annotated[int, Query(ge=1, le=10**9)] = 1, page_size: Annotated[int, Query(ge=1, le=500)] = 50,
         symbol: str | None = None, side: Side | None = None,
     ):
         """The trade ledger, newest first, one page at a time."""
@@ -291,7 +293,7 @@ def create_app(run_worker=True):
         return ledger.history(account_id, page, page_size, symbol and symbol.upper(), side)
 
     @app.get("/portfolio/{account_id}/history.csv", tags=["portfolio"])
-    def history_csv(account_id: int):
+    def history_csv(account_id: RowId):
         acct = ledger.account(account_id)
         out = io.StringIO()
         sheet = csv.writer(out)
@@ -334,24 +336,24 @@ def create_app(run_worker=True):
         return replay.start(symbol, body.start, body.starting_cash_cents)
 
     @app.get("/replays/{account_id}", tags=["replay"])
-    def get_replay(account_id: int):
+    def get_replay(account_id: RowId):
         return replay.state(account_id)
 
     @app.post("/replays/{account_id}/orders", status_code=201, tags=["replay"])
-    def replay_order(account_id: int, body: ReplayOrderIn):
+    def replay_order(account_id: RowId, body: ReplayOrderIn):
         """Placed after the day's close: a market order fills at the next open, limits and stops when reached."""
         return replay.order(account_id, body.side, body.type, body.shares, body.limit_cents, body.stop_cents, body.short)
 
     @app.post("/replays/{account_id}/step", tags=["replay"])
-    def replay_step(account_id: int, body: StepIn):
+    def replay_step(account_id: RowId, body: StepIn):
         return {"fills": replay.step(account_id, body.days), "state": replay.state(account_id)}
 
     @app.delete("/replays/{account_id}", status_code=204, tags=["replay"])
-    def close_replay(account_id: int):
+    def close_replay(account_id: RowId):
         ledger.archive_replay(account_id)
 
     @app.get("/portfolio/{account_id}/equity", tags=["portfolio"])
-    def equity(account_id: int, span: Annotated[str, Query(alias="range")] = "all"):
+    def equity(account_id: RowId, span: Annotated[str, Query(alias="range")] = "all"):
         """Daily value of the portfolio and of SPY, both indexed to 100 at the start of the range."""
         days, close_on, spy = trading_days(account_id, span)
         t, values = [d for d, _ in days], ledger.equity_curve(account_id, days, close_on)
@@ -369,7 +371,7 @@ def create_app(run_worker=True):
         }
 
     @app.get("/portfolio/{account_id}/report", tags=["portfolio"])
-    def report_card(account_id: int):
+    def report_card(account_id: RowId):
         """The trader's record since the portfolio opened, next to SPY and to following SPY's model over the same days."""
         curve = equity(account_id)
         days, close_on, _ = trading_days(account_id, "all")
@@ -432,11 +434,11 @@ def create_app(run_worker=True):
         return order
 
     @app.get("/orders", tags=["orders"])
-    def list_orders(account_id: int, status: Literal["OPEN", "FILLED", "CANCELLED", "REJECTED"] = "OPEN"):
+    def list_orders(account_id: Annotated[int, Query(le=MAX_ID)], status: Literal["OPEN", "FILLED", "CANCELLED", "REJECTED"] = "OPEN"):
         return ledger.orders(account_id, status)
 
     @app.delete("/orders/{order_id}", tags=["orders"])
-    def cancel_order(order_id: int):
+    def cancel_order(order_id: RowId):
         order = ledger.cancel_order(order_id)
         worker.orders_changed()
         hub.publish(tagged("order", order))
@@ -483,7 +485,8 @@ def create_app(run_worker=True):
         symbol: str, interval: Literal["1m", "5m", "1h", "1d", "1w"] = "1d",
         span: Annotated[str, Query(alias="range")] = "1y",
         ma1: str = "ema:20", ma2: str = "sma:50", bb: str = "20:2", rsi: str = "14", macd: str = "12:26:9",
-        account_id: int | None = None, until: int | None = None,
+        account_id: Annotated[int, Query(le=MAX_ID)] | None = None,
+        until: Annotated[int, Query(le=MAX_ID)] | None = None,
     ):
         """Bars (cents), the requested indicators, the model's out-of-sample and live calls, and your own fills.
         until cuts the chart off at that bar, for a replay."""
@@ -624,11 +627,11 @@ def create_app(run_worker=True):
         return model.runs(market.clean(symbol), interval)
 
     @app.get("/models/runs/{run_id}", tags=["model"])
-    def get_run(run_id: int):
+    def get_run(run_id: RowId):
         return model.run(run_id)
 
     @app.post("/models/runs/{run_id}/activate", tags=["model"])
-    def use_run(run_id: int):
+    def use_run(run_id: RowId):
         """Use this run for the live signal."""
         chosen = model.activate(run_id)
         hub.publish({"type": "signal", **model.live_signal(chosen["symbol"], chosen["interval"])})
