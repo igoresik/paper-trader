@@ -288,3 +288,20 @@ def test_discover_serves_the_curated_list_with_its_categories(client, monkeypatc
     assert [i["symbol"] for i in body["items"]] == ["AAPL"]
     assert body["items"][0]["categories"] == ["tech"]
     assert body["categories"][0]["id"] == "tech"
+
+
+def test_ids_too_big_for_the_database_are_refused_not_crashed(client):
+    big = 10**20
+    for method, url in [
+        ("get", f"/portfolio/{big}"),
+        ("get", "/portfolio/1/history?page=4611686018427387904&page_size=500"),
+        ("get", f"/orders?account_id={big}"),
+        ("delete", f"/orders/{big}"),
+        ("get", f"/replays/{big}"),
+        ("get", f"/models/runs/{big}"),
+        ("get", f"/market/AAPL/chart?account_id={big}"),
+        ("get", f"/market/AAPL/chart?until={big}"),
+    ]:
+        assert getattr(client, method)(url).status_code in (404, 422), url
+    r = client.post("/orders/execute", json={"account_id": big, "symbol": "AAPL", "side": "BUY", "shares": 1})
+    assert r.status_code == 422
