@@ -50,6 +50,7 @@ export function TopBar({ portfolio, onSettings }: { portfolio: Portfolio | undef
   const totals = useLiveTotals(portfolio);
   const views: { value: View; label: string }[] = [
     { value: "trade", label: "Trade" },
+    { value: "discover", label: "Discover" },
     { value: "portfolio", label: "Portfolio" },
     { value: "replay", label: "Replay" },
     { value: "lab", label: "Model lab" },

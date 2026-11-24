@@ -4,7 +4,7 @@ import { defineConfig } from "vite";
 
 // in development the API runs separately: python -m papertrader serve
 const api = "http://127.0.0.1:8000";
-const routes = ["/accounts", "/portfolio", "/orders", "/market", "/watchlist", "/models", "/settings", "/status", "/health"];
+const routes = ["/accounts", "/portfolio", "/orders", "/market", "/watchlist", "/discover", "/models", "/settings", "/status", "/health"];
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
